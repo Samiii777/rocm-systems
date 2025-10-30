@@ -453,7 +453,7 @@ DeviceThreadTracer::resource_deinit()
 void
 DeviceThreadTracer::start_context()
 {
-    ROCP_TRACE << "Start device thread trace context";
+    ROCP_INFO << "Start device thread trace context";
     std::unique_lock<std::mutex> lk(agent_mut);
 
     if(agents.empty())
@@ -483,7 +483,7 @@ DeviceThreadTracer::stop_context()
         return;
     }
 
-    ROCP_WARNING << "Stopping context";
+    ROCP_INFO << "Stopping device thread trace context";
 
     worker_flag->store(false);
 
