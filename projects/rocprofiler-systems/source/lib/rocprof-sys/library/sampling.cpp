@@ -219,7 +219,7 @@ void
 metadata_initialize_thread_info(size_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
@@ -236,7 +236,7 @@ void
 metadata_initialize_track(int64_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
@@ -292,7 +292,7 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
@@ -594,7 +594,7 @@ get_offload_file()
         if(get_use_tmp_files())
         {
             auto _success = _tmp_v->open();
-            if(get_is_continuous_integration() && !_success)
+            if(!_success)
             {
                 LOG_CRITICAL("Error opening sampling offload temporary file '{}'",
                              _tmp_v->filename);
@@ -1197,8 +1197,7 @@ post_process()
                       _raw_data.size());
         }
 
-        if(get_is_continuous_integration() &&
-           _sampler->get_sample_count() != _raw_data.size())
+        if(_sampler->get_sample_count() != _raw_data.size())
         {
             throw std::runtime_error(fmt::format(
                 "Error! sampler recorded {} samples but {} samples were returned",
@@ -1404,7 +1403,7 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
