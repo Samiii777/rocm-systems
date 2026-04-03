@@ -290,6 +290,7 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
 
   std::vector<size_t> sizes(4*nRanks);	//4 for sdispl, rdispl, scount, rcount
 #ifdef ENABLE_ROCSHMEM
+    ncclResult_t ret = ncclSuccess;
     for (int i = 0; i < nRanks; i++) {
        sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
        rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
