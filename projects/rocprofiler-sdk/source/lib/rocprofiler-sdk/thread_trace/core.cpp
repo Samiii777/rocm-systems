@@ -529,7 +529,7 @@ DeviceThreadTracer::resource_init()
             continue;
         }
 
-        agents[it->first] = std::make_unique<ThreadTracerQueue>(it->second, rocp_agent->id);
+        agents[it->first] = std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
     }
 }
 
