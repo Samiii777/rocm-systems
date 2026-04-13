@@ -321,6 +321,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
 - Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.
+- Improved rocpd capability to convert sampling data from rocprofiler-systems database to Perfetto trace.
 
 ### Resolved issues
 
