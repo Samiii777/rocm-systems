@@ -141,8 +141,6 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
         auto&   wave           = reinterpret_cast<wave_t*>(trace_events)[wave_n];
         int64_t prev_inst_time = wave.begin_time;
 
-        WaveFile(tool.config, wave);
-
         for(size_t j = 0; j < wave.instructions_size; j++)
         {
             auto& inst = wave.instructions_array[j];
@@ -156,6 +154,8 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
             line.idle += std::max<int64_t>(inst.time - prev_inst_time, 0);
             prev_inst_time = std::max(prev_inst_time, inst.time + inst.duration);
         }
+
+        WaveFile(tool.config, wave);
     }
 
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;

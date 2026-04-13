@@ -94,34 +94,23 @@ cmake --build build_coverage -j$(nproc)
 cd build_coverage && make coverage
 ```
 
-## Usage as a rocprofiler-sdk plugin
-
-### To use rocprofv3, run:
+## Usage with rocprofv3
 
 ```bash
 rocprofv3 --att -- ./a.out
 ```
 
-By default, rocprofv3 searches this library in ``LD_LIBRARY_PATH`` and the default rocprofiler-sdk install location, `/opt/rocm/lib``.
-To search custom locations, use:
-
-```bash
-rocprofv3 --att --att-library-path /path/to/lib -- ./a.out
-```
+The decoder is linked at build time by rocprofiler-sdk. No library path argument is needed.
 
 For information on how to generate thread trace data, see [using rocprofv3 to collect thread trace](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/how-to/using-thread-trace.html)
 
-### Rocprofiler-sdk API
+### C API
 
-Rocprofiler-sdk requires the library path to be provided in order to retrieve a handle:
-
-```bash
-rocprofiler_thread_trace_decoder_handle_t decoder{};
-# Notes: Passing null string "" searches in LD_LIBRARY_PATH. Passing nullptr is not allowed.
-auto status = rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib");
+```cpp
+rocprof_trace_decoder_handle_t decoder{};
+auto status = rocprof_trace_decoder_create_handle(&decoder);
 ```
 
-For more information, see 
+For more information, see
 * [The rocprofiler-sdk documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/api-reference/thread_trace.html)
 * [The rocprofiler-sdk thread trace sample](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/samples/thread_trace/agent.cpp)
-* [The rocprofiler-sdk thread trace API](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace)
