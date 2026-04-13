@@ -990,6 +990,222 @@ TEST_F(NetIbMPITest, MultiRecv255BatchesEightSends) {
     }
 }
 
+TEST_F(NetIbMPITest, MultiRecv255BatchesEightSendsShuffledTagOrder) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    int dev = -1;
+    for (int i = 0; i < ndev; i++) {
+        ncclNetProperties_t props;
+        memset(&props, 0, sizeof(props));
+        ASSERT_EQ(GetDeviceProperties(i, &props), ncclSuccess);
+        if (props.name && !strchr(props.name, '+')) {
+            dev = i;
+            break;
+        }
+    }
+    ASSERT_GE(dev, 0) << "No physical NIC found";
+
+    static constexpr int kWidth = 8;
+    static constexpr int kNumBatches = 255;
+    static constexpr int kBaseTag = 12000;
+    static constexpr size_t kBaseSizes[kWidth] = {
+        1, 64, 256, 1024, 4096, 16384, 65536, 131072
+    };
+
+    // recv slot -> logical message id
+    static constexpr int kRecvOrder[kWidth] = {3, 0, 6, 1, 7, 2, 5, 4};
+    // send issue order over logical message ids
+    static constexpr int kSendOrder[kWidth] = {5, 2, 7, 0, 6, 3, 1, 4};
+
+    auto FillPattern = [&](void* buf, size_t size, int batch, int msgId) {
+        uint8_t* p = static_cast<uint8_t*>(buf);
+        for (size_t j = 0; j < size; j++) {
+            p[j] = static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % kBytePatternModulo);
+        }
+    };
+
+    auto CheckPattern = [&](void* buf, size_t size, int batch, int msgId) -> bool {
+        uint8_t* p = static_cast<uint8_t*>(buf);
+        for (size_t j = 0; j < size; j++) {
+            uint8_t expected =
+                static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % kBytePatternModulo);
+            if (p[j] != expected) return false;
+        }
+        return true;
+    };
+
+    void* listenComm = nullptr;
+    void* recvComm = nullptr;
+    void* sendComm = nullptr;
+    ncclNetHandle_t handle;
+    memset(&handle, 0, sizeof(handle));
+
+    if (rank == 0) {
+        ASSERT_EQ(CreateListenComm(dev, &handle, &listenComm), ncclSuccess);
+        ASSERT_NE(listenComm, nullptr);
+        MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 1101, MPI_COMM_WORLD);
+    } else {
+        MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 1101, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+    }
+
+    if (rank == 0) {
+        while (!recvComm)
+            AcceptConnection(listenComm, &recvComm);
+        ASSERT_NE(recvComm, nullptr);
+    } else {
+        while (!sendComm)
+            ConnectToRemote(dev, &handle, &sendComm);
+        ASSERT_NE(sendComm, nullptr);
+    }
+
+    for (int batch = 0; batch < kNumBatches; batch++) {
+        int msgTags[kWidth];
+        size_t msgSizes[kWidth];
+        for (int msgId = 0; msgId < kWidth; msgId++) {
+            msgTags[msgId] = kBaseTag + batch * 100 + msgId;
+            msgSizes[msgId] = kBaseSizes[msgId];
+        }
+
+        if (rank == 0) {
+            void* bufs[kWidth] = {};
+            void* mhs[kWidth] = {};
+            size_t recvSizesArg[kWidth];
+            int recvTags[kWidth];
+            int recvSizesOut[kWidth] = {};
+
+            for (int slot = 0; slot < kWidth; slot++) {
+                int msgId = kRecvOrder[slot];
+                recvTags[slot] = msgTags[msgId];
+                recvSizesArg[slot] = msgSizes[msgId];
+
+                bufs[slot] = malloc(recvSizesArg[slot]);
+                ASSERT_NE(bufs[slot], nullptr)
+                    << "malloc failed for recv batch=" << batch << " slot=" << slot;
+                memset(bufs[slot], 0xCC, recvSizesArg[slot]);
+
+                ASSERT_EQ(RegisterMemory(recvComm, bufs[slot], recvSizesArg[slot],
+                                         NCCL_PTR_HOST, &mhs[slot]),
+                          ncclSuccess)
+                    << "RegisterMemory failed for recv batch=" << batch << " slot=" << slot;
+                ASSERT_NE(mhs[slot], nullptr);
+            }
+
+            void* req = nullptr;
+            ASSERT_EQ(PostRecv(recvComm, kWidth, bufs, recvSizesArg, recvTags, mhs, &req),
+                      ncclSuccess)
+                << "PostRecv failed for batch=" << batch;
+            ASSERT_NE(req, nullptr) << "PostRecv returned null request for batch=" << batch;
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            ASSERT_EQ(WaitForCompletion(req, recvSizesOut, kLargeTransferTimeoutMs), ncclSuccess)
+                << "WaitForCompletion failed for recv batch=" << batch;
+
+            for (int slot = 0; slot < kWidth; slot++) {
+                int msgId = kRecvOrder[slot];
+                EXPECT_EQ(recvSizesOut[slot], static_cast<int>(msgSizes[msgId]))
+                    << "recv size mismatch at batch=" << batch
+                    << " slot=" << slot
+                    << " msgId=" << msgId;
+
+                bool ok = CheckPattern(bufs[slot], msgSizes[msgId], batch, msgId);
+                EXPECT_TRUE(ok)
+                    << "data mismatch at batch=" << batch
+                    << " slot=" << slot
+                    << " expected msgId=" << msgId
+                    << " tag=" << msgTags[msgId]
+                    << " size=" << msgSizes[msgId];
+            }
+
+            for (int slot = 0; slot < kWidth; slot++) {
+                ASSERT_EQ(DeregisterMemory(recvComm, mhs[slot]), ncclSuccess)
+                    << "DeregisterMemory failed for recv batch=" << batch
+                    << " slot=" << slot;
+                free(bufs[slot]);
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+        } else {
+            void* bufs[kWidth] = {};
+            void* mhs[kWidth] = {};
+            void* reqs[kWidth] = {};
+
+            for (int msgId = 0; msgId < kWidth; msgId++) {
+                bufs[msgId] = malloc(msgSizes[msgId]);
+                ASSERT_NE(bufs[msgId], nullptr)
+                    << "malloc failed for send batch=" << batch << " msgId=" << msgId;
+
+                FillPattern(bufs[msgId], msgSizes[msgId], batch, msgId);
+
+                ASSERT_EQ(RegisterMemory(sendComm, bufs[msgId], msgSizes[msgId],
+                                         NCCL_PTR_HOST, &mhs[msgId]),
+                          ncclSuccess)
+                    << "RegisterMemory failed for send batch=" << batch
+                    << " msgId=" << msgId;
+                ASSERT_NE(mhs[msgId], nullptr);
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            for (int oi = 0; oi < kWidth; oi++) {
+                int msgId = kSendOrder[oi];
+                reqs[msgId] = nullptr;
+                int attempts = 0;
+                do {
+                    ASSERT_EQ(PostSend(sendComm, bufs[msgId], msgSizes[msgId],
+                                       msgTags[msgId], mhs[msgId], &reqs[msgId]),
+                              ncclSuccess)
+                        << "PostSend failed for batch=" << batch
+                        << " msgId=" << msgId;
+                    if (reqs[msgId]) break;
+                    attempts++;
+                    usleep(kPollIntervalUs);
+                } while (attempts < kMaxRetryAttempts);
+
+                ASSERT_NE(reqs[msgId], nullptr)
+                    << "PostSend returned null request for batch=" << batch
+                    << " msgId=" << msgId;
+            }
+
+            for (int msgId = 0; msgId < kWidth; msgId++) {
+                int sentSize[1] = {0};
+                ASSERT_EQ(WaitForCompletion(reqs[msgId], sentSize, kLargeTransferTimeoutMs),
+                          ncclSuccess)
+                    << "send completion failed for batch=" << batch
+                    << " msgId=" << msgId;
+            }
+
+            for (int msgId = 0; msgId < kWidth; msgId++) {
+                ASSERT_EQ(DeregisterMemory(sendComm, mhs[msgId]), ncclSuccess)
+                    << "DeregisterMemory failed for send batch=" << batch
+                    << " msgId=" << msgId;
+                free(bufs[msgId]);
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+    }
+
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+}
+
 TEST_F(NetIbMPITest, SendRecvZeroSize) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
