@@ -104,20 +104,28 @@ const char*
 rocprof_trace_decoder_get_status_string(rocprofiler_thread_trace_decoder_status_t status);
 
 /**
- * @defgroup decoder_versioning API Versioning
+ * @brief Parses thread trace data using callbacks (V1 API).
  *
- * The library is built with a specific API version, controlled by the VERSION_MINOR CMake variable:
+ * Stateless 4-arg parse function with no handle management.
+ * Backwards-compatible with rocprofiler-sdk <= 7.13.
  *
- * **V1 (SOVERSION 0.1, VERSION_MINOR=1):** Backwards-compatible with rocprofiler-sdk <= 7.13.
- *   Exports `rocprof_trace_decoder_parse_data(se_data_cb, trace_cb, isa_cb, userdata)` —
- *   a stateless 4-arg function with no handle management.
- *
- * **V2 (SOVERSION 0.2, VERSION_MINOR=2, default):** New handle-based API.
- *   Exports `rocprof_trace_decoder_parse(handle, data, size, trace_cb, userdata)` and
- *   handle management functions (create, destroy, codeobj_load/unload, set_isa_callback).
- *
- * To build for old SDK compatibility: `cmake -DVERSION_MINOR=1 ...`
- *
+ * @param[in] se_data_callback Callback to retrieve shader engine data buffers.
+ * @param[in] trace_callback Callback invoked for each decoded record.
+ * @param[in] isa_callback Callback for ISA resolution of each instruction.
+ * @param[in] userdata Arbitrary data pointer passed back via callbacks.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA on malformed input.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
+ * @deprecated Use the handle-based API (rocprof_trace_decoder_parse) instead.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_parse_data(rocprof_trace_decoder_se_data_callback_t se_data_callback,
+                                 rocprof_trace_decoder_trace_callback_t   trace_callback,
+                                 rocprof_trace_decoder_isa_callback_t     isa_callback,
+                                 void*                                    userdata);
+
+/**
+ * @defgroup decoder_handle Handle-based Decoder API (V2)
  * @{
  */
 
@@ -130,8 +138,6 @@ typedef struct
 } rocprof_trace_decoder_handle_t;
 
 /**
- * @defgroup decoder_handle Handle-based Decoder API
- *
  * The decoder supports two mutually exclusive modes for ISA resolution during trace parsing.
  * Only one needs to be configured before calling rocprof_trace_decoder_parse():
  *
@@ -142,8 +148,6 @@ typedef struct
  * **Mode 2 — Custom ISA callback:**
  *   Set a callback via rocprof_trace_decoder_set_isa_callback(). The decoder calls it
  *   for every instruction encountered during parsing. No code objects need to be loaded.
- *
- * @{
  */
 
 /**

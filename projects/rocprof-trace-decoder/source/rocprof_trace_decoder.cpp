@@ -325,9 +325,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_i
 
 // COMGR-dependent functions
 
-#if ROCPROF_TRACE_DECODER_VERSION_MINOR <= 1
-
-// V1 (0.1.x) API: stateless 4-arg parse, no handle management
+// V1 API: stateless 4-arg parse, no handle management
 PUBLIC_API rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_parse_data(
     rocprof_trace_decoder_se_data_callback_t se_data_callback,
@@ -338,9 +336,7 @@ rocprof_trace_decoder_parse_data(
     return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
 }
 
-#else // ROCPROF_TRACE_DECODER_VERSION_MINOR >= 2
-
-// V2 (0.2.x) API: handle-based with built-in code object management
+// V2 API: handle-based with built-in code object management
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
 
@@ -470,8 +466,6 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
 }
 
 #endif // ROCPROF_TRACE_DECODER_COMGR_DISABLED
-
-#endif // ROCPROF_TRACE_DECODER_VERSION_MINOR >= 2
 
 PUBLIC_API const char* rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t info)
 {

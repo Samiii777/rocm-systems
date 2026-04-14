@@ -8,15 +8,11 @@ if(NOT DEFINED VERSION_MAJOR)
 endif()
 
 if(NOT DEFINED VERSION_MINOR)
-    set(VERSION_MINOR 1)
+    set(VERSION_MINOR 2)
 endif()
 
 if(NOT DEFINED VERSION_PATCH)
-    if(VERSION_MINOR EQUAL 1)
-        set(VERSION_PATCH 8)
-    else()
-        set(VERSION_PATCH 0)
-    endif()
+    set(VERSION_PATCH 0)
 endif()
 
 set(VERSION_PATCH ${VERSION_PATCH})
