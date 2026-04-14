@@ -133,6 +133,7 @@ set_target_properties(
     PROPERTIES VERSION ${PROJECT_VERSION}
                SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
                EXPORT_NAME rocprof-trace-decoder
+               INSTALL_RPATH "\$ORIGIN"
                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 

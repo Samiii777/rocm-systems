@@ -220,6 +220,25 @@ rocprof_trace_decoder_set_isa_callback(rocprof_trace_decoder_handle_t       hand
                                        void*                                userdata);
 
 /**
+ * @brief Sets a custom SE data callback for trace parsing.
+ *
+ * When set, the decoder uses this callback to retrieve shader engine data instead
+ * of the data/data_size arguments passed to rocprof_trace_decoder_parse().
+ * This allows using the handle-based API with the same streaming interface as the
+ * deprecated rocprof_trace_decoder_parse_data().
+ * Set callback to NULL to revert to using data/data_size arguments.
+ *
+ * @param[in] handle The decoder handle.
+ * @param[in] callback The SE data callback, or NULL to use data/data_size arguments.
+ * @param[in] userdata Userdata passed to the callback.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_set_se_data_callback(rocprof_trace_decoder_handle_t          handle,
+                                           rocprof_trace_decoder_se_data_callback_t callback,
+                                           void*                                    userdata);
+
+/**
  * @brief Parses a buffer of thread trace data (V2 API).
  *
  * Requires either loaded code objects (Mode 1) or a custom ISA callback (Mode 2)
