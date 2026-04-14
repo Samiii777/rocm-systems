@@ -325,6 +325,23 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_i
 
 // COMGR-dependent functions
 
+#if ROCPROF_TRACE_DECODER_VERSION_MINOR <= 1
+
+// V1 (0.1.x) API: stateless 4-arg parse, no handle management
+PUBLIC_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_parse_data(
+    rocprof_trace_decoder_se_data_callback_t se_data_callback,
+    rocprof_trace_decoder_trace_callback_t   trace_callback,
+    rocprof_trace_decoder_isa_callback_t     isa_callback,
+    void*                                    userdata)
+{
+    return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+}
+
+#else // ROCPROF_TRACE_DECODER_VERSION_MINOR >= 2
+
+// V2 (0.2.x) API: handle-based with built-in code object management
+
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
 
 PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_load(
@@ -369,7 +386,7 @@ rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t handle, uint
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(
+PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
     rocprof_trace_decoder_handle_t handle,
     const void* data,
     uint64_t data_size,
@@ -421,7 +438,7 @@ rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t, uint64_t)
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(
+PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
     rocprof_trace_decoder_handle_t handle,
     const void* data,
     uint64_t data_size,
@@ -453,6 +470,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
 }
 
 #endif // ROCPROF_TRACE_DECODER_COMGR_DISABLED
+
+#endif // ROCPROF_TRACE_DECODER_VERSION_MINOR >= 2
 
 PUBLIC_API const char* rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t info)
 {

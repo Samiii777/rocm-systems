@@ -1,9 +1,9 @@
 # ROCprof Trace Decoder
 
 > [!WARNING]
-> This is an early preview of beta 0.1.7
+> This is an early preview of beta 0.2.0
 
-- Please check the [CHANGELOG](CHANGELOG.md) for 0.1.7
+- Please check the [CHANGELOG](CHANGELOG.md)
 - Integration with TheRock is a work in progress.
 
 ## Description
@@ -114,3 +114,19 @@ auto status = rocprof_trace_decoder_create_handle(&decoder);
 For more information, see
 * [The rocprofiler-sdk documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/api-reference/thread_trace.html)
 * [The rocprofiler-sdk thread trace sample](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/samples/thread_trace/agent.cpp)
+
+## API Versions
+
+The library API version is controlled by `VERSION_MINOR` and reflected in the SONAME:
+
+| VERSION_MINOR | SONAME | API |
+|---|---|---|
+| 1 | `librocprof-trace-decoder.so.0.1` | V1: stateless `rocprof_trace_decoder_parse_data(se_data_cb, trace_cb, isa_cb, userdata)`. Compatible with rocprofiler-sdk <= 7.13. |
+| 2 (default) | `librocprof-trace-decoder.so.0.2` | V2: handle-based `rocprof_trace_decoder_parse(handle, data, size, trace_cb, userdata)` with `create_handle`, `destroy_handle`, `codeobj_load/unload`, and `set_isa_callback`. |
+
+To build the V1 library for backwards compatibility with older rocprofiler-sdk releases:
+
+```bash
+cmake -B build -DVERSION_MINOR=1
+cmake --build build -j$(nproc)
+```

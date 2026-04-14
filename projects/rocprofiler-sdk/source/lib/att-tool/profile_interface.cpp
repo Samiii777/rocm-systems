@@ -157,7 +157,7 @@ ToolData::ToolData(std::vector<char>&                    _data,
 , decoder(_decoder)
 {
     auto status =
-        rocprof_trace_decoder_parse_data(decoder, _data.data(), _data.size(), get_trace_data, this);
+        rocprof_trace_decoder_parse(decoder, _data.data(), _data.size(), get_trace_data, this);
     ROCP_ERROR_IF(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) << ": " << status;
 }
 

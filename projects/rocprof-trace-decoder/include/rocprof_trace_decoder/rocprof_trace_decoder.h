@@ -109,6 +109,24 @@ typedef void (*rocprofiler_thread_trace_decoder_debug_callback_t)(int64_t     ti
                                                                   void*       userdata);
 
 /**
+ * @defgroup decoder_versioning API Versioning
+ *
+ * The library is built with a specific API version, controlled by the VERSION_MINOR CMake variable:
+ *
+ * **V1 (SOVERSION 0.1, VERSION_MINOR=1):** Backwards-compatible with rocprofiler-sdk <= 7.13.
+ *   Exports `rocprof_trace_decoder_parse_data(se_data_cb, trace_cb, isa_cb, userdata)` —
+ *   a stateless 4-arg function with no handle management.
+ *
+ * **V2 (SOVERSION 0.2, VERSION_MINOR=2, default):** New handle-based API.
+ *   Exports `rocprof_trace_decoder_parse(handle, data, size, trace_cb, userdata)` and
+ *   handle management functions (create, destroy, codeobj_load/unload, set_isa_callback).
+ *
+ * To build for old SDK compatibility: `cmake -DVERSION_MINOR=1 ...`
+ *
+ * @{
+ */
+
+/**
  * @brief Opaque handle for a decoder instance with code object tracking.
  */
 typedef struct
@@ -120,7 +138,7 @@ typedef struct
  * @defgroup decoder_handle Handle-based Decoder API
  *
  * The decoder supports two mutually exclusive modes for ISA resolution during trace parsing.
- * Only one needs to be configured before calling rocprof_trace_decoder_parse_data():
+ * Only one needs to be configured before calling rocprof_trace_decoder_parse():
  *
  * **Mode 1 — Built-in disassembly (requires COMGR):**
  *   Load code objects via rocprof_trace_decoder_codeobj_load(). The decoder uses COMGR
@@ -203,7 +221,7 @@ rocprof_trace_decoder_set_isa_callback(rocprof_trace_decoder_handle_t       hand
                                        void*                                userdata);
 
 /**
- * @brief Parses a buffer of thread trace data.
+ * @brief Parses a buffer of thread trace data (V2 API).
  *
  * Requires either loaded code objects (Mode 1) or a custom ISA callback (Mode 2)
  * to be configured on the handle before calling. See @ref decoder_handle for details.
@@ -220,11 +238,11 @@ rocprof_trace_decoder_set_isa_callback(rocprof_trace_decoder_handle_t       hand
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
  */
 rocprofiler_thread_trace_decoder_status_t
-rocprof_trace_decoder_parse_data(rocprof_trace_decoder_handle_t         handle,
-                                 const void*                            data,
-                                 uint64_t                               data_size,
-                                 rocprof_trace_decoder_trace_callback_t trace_callback,
-                                 void*                                  userdata);
+rocprof_trace_decoder_parse(rocprof_trace_decoder_handle_t         handle,
+                            const void*                            data,
+                            uint64_t                               data_size,
+                            rocprof_trace_decoder_trace_callback_t trace_callback,
+                            void*                                  userdata);
 
 /** @} */
 

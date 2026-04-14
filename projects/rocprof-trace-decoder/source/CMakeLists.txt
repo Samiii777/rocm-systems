@@ -5,7 +5,7 @@ if(NOT DEFINED VERSION_MAJOR)
 endif()
 
 if(NOT DEFINED VERSION_MINOR)
-    set(VERSION_MINOR 1)
+    set(VERSION_MINOR 2)
 endif()
 
 if(NOT DEFINED VERSION_PATCH)
@@ -113,6 +113,7 @@ if(NOT DISABLE_COMGR)
     target_include_directories(rocprof-trace-decoder-objects PRIVATE ${ROCM_INCLUDE_DIR})
 endif()
 set_target_properties(rocprof-trace-decoder-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_VERSION_MINOR=${VERSION_MINOR})
 option(SQTT_LOGGING "Enable SQTT logging" OFF)
 if(SQTT_LOGGING)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE SQTT_LOGGING)
@@ -130,7 +131,7 @@ target_link_libraries(rocprof-trace-decoder PRIVATE pthread ${TTD_COMGR_LINK_LIB
 set_target_properties(
     rocprof-trace-decoder
     PROPERTIES VERSION ${PROJECT_VERSION}
-               SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
+               SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
                EXPORT_NAME rocprof-trace-decoder
                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -155,6 +156,7 @@ if(DEFINED BUILD_TESTS AND BUILD_TESTS)
     else()
         target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ROCPROF_TRACE_DECODER_COMGR_DISABLED)
     endif()
+    target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ROCPROF_TRACE_DECODER_VERSION_MINOR=${VERSION_MINOR})
     target_compile_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined -g -O1)
     target_link_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined)
     set_target_properties(rocprof-trace-decoder-sanitized PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")

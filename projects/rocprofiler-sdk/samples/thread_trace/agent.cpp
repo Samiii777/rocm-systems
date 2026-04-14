@@ -249,7 +249,7 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
     };
 
-    DECODER_CALL(rocprof_trace_decoder_parse_data(decoder, se_data, data_size, parse, nullptr));
+    DECODER_CALL(rocprof_trace_decoder_parse(decoder, se_data, data_size, parse, nullptr));
 }
 
 }  // namespace Decoder

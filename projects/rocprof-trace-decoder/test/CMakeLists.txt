@@ -170,9 +170,7 @@ if(BUILD_INTEGRATION_TESTS)
                            ENVIRONMENT
                            "${WENV}"
                            WORKING_DIRECTORY
-                           ${TEST_BIN_DIR}
-                           FIXTURES_REQUIRED
-                           unpack_data)
+                           ${TEST_BIN_DIR})
 
             add_test(NAME ${DATA}_validate COMMAND ${TEST_BIN_DIR}/diff.sh ${DATA})
             set_tests_properties(

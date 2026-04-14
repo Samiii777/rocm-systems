@@ -171,7 +171,7 @@ ToolData::ToolData(const std::vector<char>& _data, WaveConfig& _config, rocprof_
 {
     trace_data_t data{.tool = this};
 
-    CHECK_DECODER(rocprof_trace_decoder_parse_data(decoder, _data.data(), _data.size(), get_trace_data, &data));
+    CHECK_DECODER(rocprof_trace_decoder_parse(decoder, _data.data(), _data.size(), get_trace_data, &data));
     if (std::getenv("AM_DONT_CHECK") != nullptr) return;
 
     CHECK_TRUE(data.gfxip >= 9 && data.gfxip <= 12);

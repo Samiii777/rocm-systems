@@ -257,7 +257,7 @@ The thread trace service asynchronously delivers raw trace data via a dedicated 
                          rocprofiler_user_data_t userdata)
     {
         // Process shader callback data using the Trace Decoder.
-        DECODER_CALL(rocprof_trace_decoder_parse_data(decoder_handle,
+        DECODER_CALL(rocprof_trace_decoder_parse(decoder_handle,
                                                       data,
                                                       data_size,
                                                       trace_decoder_callback,
