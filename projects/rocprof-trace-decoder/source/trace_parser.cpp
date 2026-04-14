@@ -146,6 +146,8 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
 {
     if (gfx9_target_cu < 0)
     {
+        if (BUFFER_SIZE < sizeof(rocprof_trace_decoder_gfx9_header_t)) return nullptr;
+
         auto gfx9_header = *reinterpret_cast<const rocprof_trace_decoder_gfx9_header_t*>(buffer);
         if ((gfx9_header.legacy_version == 0 || gfx9_header.legacy_version == 0x11) &&
             (gfx9_header.gfx9_version2 >= 4 && gfx9_header.gfx9_version2 <= 6))

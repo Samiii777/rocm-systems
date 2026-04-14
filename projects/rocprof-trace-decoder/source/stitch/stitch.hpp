@@ -58,10 +58,8 @@ public:
 
 inline std::pair<StringView, StringView> split2(StringView view, StringView s)
 {
-    static std::string empty{""};
-
     size_t pos = view.find(s);
-    if (pos == std::string::npos || pos + s.size() >= view.size()) return {view, empty};
+    if (pos == std::string::npos || pos + s.size() >= view.size()) return {view, StringView{}};
     return {view.substr(0, pos), view.substr(pos + s.size())};
 }
 

@@ -152,6 +152,7 @@ struct DecoderInstance
 
 struct HandleData
 {
+    std::mutex mtx;
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
     std::shared_ptr<DecoderInstance> instance;
 #endif
@@ -290,6 +291,25 @@ rocprofiler_thread_trace_decoder_status_t parse_isa_adapter(
 
 } // namespace
 
+template <typename CallbackT> static rocprofiler_thread_trace_decoder_status_t set_handle_callback(
+    rocprof_trace_decoder_handle_t handle,
+    CallbackT callback,
+    void* userdata,
+    CallbackT HandleData::*cb_field,
+    void* HandleData::*ud_field
+)
+{
+    auto hd = get_handle_data(handle);
+    if (!hd) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    {
+        std::lock_guard<std::mutex> lock(hd->mtx);
+        hd.get()->*cb_field = callback;
+        hd.get()->*ud_field = userdata;
+    }
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+}
+
 // ============================================================================
 // Public C API
 // ============================================================================
@@ -327,35 +347,25 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_i
     rocprof_trace_decoder_handle_t handle, rocprof_trace_decoder_isa_callback_t callback, void* userdata
 )
 {
-    auto hd = get_handle_data(handle);
-    if (!hd) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    hd->isa_cb = callback;
-    hd->isa_userdata = userdata;
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+    return set_handle_callback(handle, callback, userdata, &HandleData::isa_cb, &HandleData::isa_userdata);
 }
 
 PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_se_data_callback(
     rocprof_trace_decoder_handle_t handle, rocprof_trace_decoder_se_data_callback_t callback, void* userdata
 )
 {
-    auto hd = get_handle_data(handle);
-    if (!hd) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    hd->se_data_cb = callback;
-    hd->se_data_userdata = userdata;
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+    return set_handle_callback(handle, callback, userdata, &HandleData::se_data_cb, &HandleData::se_data_userdata);
 }
 
 // COMGR-dependent functions
 
 // V1 API: stateless 4-arg parse, no handle management
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t
-rocprof_trace_decoder_parse_data(
+PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(
     rocprof_trace_decoder_se_data_callback_t se_data_callback,
-    rocprof_trace_decoder_trace_callback_t   trace_callback,
-    rocprof_trace_decoder_isa_callback_t     isa_callback,
-    void*                                    userdata)
+    rocprof_trace_decoder_trace_callback_t trace_callback,
+    rocprof_trace_decoder_isa_callback_t isa_callback,
+    void* userdata
+)
 {
     return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
 }
@@ -421,25 +431,29 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
     ctx.trace_cb = trace_callback;
     ctx.trace_ud = userdata;
 
-    if (hd->isa_cb)
+    auto se_adapter = parse_se_adapter;
     {
-        ctx.isa_cb = hd->isa_cb;
-        ctx.isa_ud = hd->isa_userdata;
-    }
-    else
-    {
-        ctx.isa_cb = comgr_isa_callback;
-        ctx.isa_ud = hd->instance.get();
+        std::lock_guard<std::mutex> lock(hd->mtx);
+        if (hd->isa_cb)
+        {
+            ctx.isa_cb = hd->isa_cb;
+            ctx.isa_ud = hd->isa_userdata;
+        }
+        else
+        {
+            ctx.isa_cb = comgr_isa_callback;
+            ctx.isa_ud = hd->instance.get();
+        }
+
+        if (hd->se_data_cb)
+        {
+            ctx.se_data_cb = hd->se_data_cb;
+            ctx.se_data_ud = hd->se_data_userdata;
+            se_adapter = se_data_cb_adapter;
+        }
     }
 
-    auto se_adapter = parse_se_adapter;
-    if (hd->se_data_cb)
-    {
-        ctx.se_data_cb = hd->se_data_cb;
-        ctx.se_data_ud = hd->se_data_userdata;
-        se_adapter = se_data_cb_adapter;
-    }
-    else
+    if (se_adapter == parse_se_adapter)
     {
         ctx.data = static_cast<const uint8_t*>(data);
         ctx.size = data_size;
@@ -480,22 +494,27 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
     auto hd = get_handle_data(handle);
     if (!hd) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    if (!hd->isa_cb) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
     parse_ctx_t ctx{};
     ctx.trace_cb = trace_callback;
     ctx.trace_ud = userdata;
-    ctx.isa_cb = hd->isa_cb;
-    ctx.isa_ud = hd->isa_userdata;
 
     auto se_adapter = parse_se_adapter;
-    if (hd->se_data_cb)
     {
-        ctx.se_data_cb = hd->se_data_cb;
-        ctx.se_data_ud = hd->se_data_userdata;
-        se_adapter = se_data_cb_adapter;
+        std::lock_guard<std::mutex> lock(hd->mtx);
+        if (!hd->isa_cb) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+        ctx.isa_cb = hd->isa_cb;
+        ctx.isa_ud = hd->isa_userdata;
+
+        if (hd->se_data_cb)
+        {
+            ctx.se_data_cb = hd->se_data_cb;
+            ctx.se_data_ud = hd->se_data_userdata;
+            se_adapter = se_data_cb_adapter;
+        }
     }
-    else
+
+    if (se_adapter == parse_se_adapter)
     {
         ctx.data = static_cast<const uint8_t*>(data);
         ctx.size = data_size;

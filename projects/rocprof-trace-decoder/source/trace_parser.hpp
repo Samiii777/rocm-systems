@@ -35,8 +35,8 @@
 #include <utility>
 #include <vector>
 #include "rocprof_trace_decoder/cxx/common.hpp"
-#include "segment.hpp"
 #include "rocprof_trace_decoder/trace_decoder_instrument.h"
+#include "segment.hpp"
 
 inline bool bValid(pcinfo_t pc) { return pc.code_object_id != 0 || pc.address != 0; }
 
