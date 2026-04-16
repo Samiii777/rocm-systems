@@ -22,6 +22,7 @@
 #ifndef ROCM_SMI_ROCM_SMI_DYN_GPU_METRICS_H_
 #define ROCM_SMI_ROCM_SMI_DYN_GPU_METRICS_H_
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -359,8 +360,6 @@ struct AMDGpuDynamicMetricsHeader_v1_t {
  private:
 };
 
-using AMDGpuDynamicMetricsVersion_t = std::set<std::pair<std::uint8_t, std::uint8_t>>;
-
 /*
  * Attribute IDs for the GPU metrics
  */
@@ -371,11 +370,36 @@ struct AMDGpuMetricAttributeInstance_t {
   std::string m_name;
   std::string m_description;
   AMDGpuMetricAttributeId_t m_attribute_id;
+  // Canonical (widest) accepted type — always reflects get_canonical_type().
   AMDGpuMetricAttributeType_t m_attribute_type;
   AMDGpuMetricUnitType_t m_unit_type;
 
   AMDGpuMetricAttributeInstance_t() = default;
 
+  /*
+   *  Two constructor formats are supported:
+   *
+   *  Format 1 — Single accepted type (most attributes):
+   *
+   *    AMDGpuMetricAttributeInstance_t(name, desc, id, TYPE_UINT16, CELSIUS)
+   *
+   *    Use when the driver has always emitted one fixed data width for this attribute
+   *    and no cross-version type change is expected.
+   *
+   *  Format 2 — Multiple accepted types (backwards-compatibility):
+   *
+   *    AMDGpuMetricAttributeInstance_t(name, desc, id, UNIT, {TYPE_UINT32, TYPE_UINT64})
+   *
+   *    Use when the driver has changed the data width of an attribute across versions
+   *    and the library must accept both. The canonical (output) type is the widest entry
+   *    in the set (highest enum value). Older driver versions that emit a narrower type
+   *    are still accepted and parsed correctly.
+   *
+   *    Example: ACCUMULATION_COUNTER was TYPE_UINT32 in older drivers and TYPE_UINT64
+   *    in mainline (amdgpu 6.x+). Specifying {TYPE_UINT32, TYPE_UINT64} ensures both
+   *    driver versions parse without a schema lookup miss.
+   */
+  // Format 1 — single accepted type
   AMDGpuMetricAttributeInstance_t(const std::string& name, const std::string& description,
                                   AMDGpuMetricAttributeId_t attribute_id,
                                   AMDGpuMetricAttributeType_t attribute_type,
@@ -383,59 +407,79 @@ struct AMDGpuMetricAttributeInstance_t {
       : m_name(name),
         m_description(description),
         m_attribute_id(attribute_id),
-        m_attribute_type(attribute_type),
-        m_unit_type(unit_type) {
-    m_unique_id = get_unique_attribute_id(attribute_id, attribute_type);
-
-    /*
-     *  The availability version is a set of pairs representing the major and minor version.
-     *  This allows for tracking the availability of the metric across different versions.
-     *  For now, we initialize it to an empty set, meaning the metric is available in all versions.
-     */
-    m_availability_version = {{0, 0}};
+        m_unit_type(unit_type),
+        m_accepted_types({attribute_type}) {
+    m_attribute_type = get_canonical_type();
+    m_unique_id = get_unique_attribute_id(attribute_id, m_attribute_type);
   }
 
+  /*
+   *  Constructor with multiple accepted types (Format 2 — see above).
+   */
+  // Format 2 — multiple accepted types
   AMDGpuMetricAttributeInstance_t(const std::string& name, const std::string& description,
                                   AMDGpuMetricAttributeId_t attribute_id,
-                                  AMDGpuMetricAttributeType_t attribute_type,
                                   AMDGpuMetricUnitType_t unit_type,
-                                  const AMDGpuDynamicMetricsVersion_t& availability_version)
+                                  std::initializer_list<AMDGpuMetricAttributeType_t> accepted_types)
       : m_name(name),
         m_description(description),
         m_attribute_id(attribute_id),
-        m_attribute_type(attribute_type),
         m_unit_type(unit_type),
-        m_availability_version(availability_version) {
-    m_unique_id = get_unique_attribute_id(attribute_id, attribute_type);
+        m_accepted_types(accepted_types) {
+    m_attribute_type = get_canonical_type();
+    m_unique_id = get_unique_attribute_id(attribute_id, m_attribute_type);
+  }
+
+  /*
+   *  Returns the canonical (widest) accepted attribute type, determined by sizeof.
+   *  For single-type attributes, this is the only accepted type.
+   *  For multi-type attributes (e.g. UINT32|UINT64), this is the widest by byte size.
+   *  Using sizeof rather than enum ordinal avoids relying on enum declaration order.
+   */
+  auto get_canonical_type() const -> AMDGpuMetricAttributeType_t {
+    return *std::max_element(m_accepted_types.begin(), m_accepted_types.end(),
+                             [](AMDGpuMetricAttributeType_t a, AMDGpuMetricAttributeType_t b) {
+                               return get_metric_data_type_size(a) < get_metric_data_type_size(b);
+                             });
+  }
+
+  /*
+   *  Returns true if the driver-emitted type is accepted by this attribute instance.
+   */
+  auto accepts_type(AMDGpuMetricAttributeType_t type) const -> bool {
+    return m_accepted_types.count(type) > 0;
   }
 
   /*
    *  Get the unique ID of the metric instance.
    */
-  constexpr auto get_unique_attribute_id(AMDGpuMetricAttributeId_t attribute_id,
-                                         AMDGpuMetricAttributeType_t attribute_type)
-      -> std::uint64_t {
+  auto get_unique_attribute_id(AMDGpuMetricAttributeId_t attribute_id,
+                               AMDGpuMetricAttributeType_t attribute_type) -> std::uint64_t {
     /*
      *  The unique ID is calculated based on the attribute ID and type.
      *  This allows for a unique identifier for each metric instance.
+     *
+     * Computes a unique ID from the attribute ID and its canonical type.
+     * Callers pass get_canonical_type() so that multi-type attributes (e.g. UINT32|UINT64)
+     * always hash to the same ID regardless of which width the driver emitted.
      *
      *  Example:
      *    If attribute_id is TEMPERATURE_MEM (1) and attribute_type is TYPE_INT32 (5),
      *    then m_unique_id will be 1 * 100 + 5 = 105.
      *
-     *  We might need to revisit this, but for now, it serves as a unique identifier.
+     * Note: spacing between IDs (×100) gives room for all 8 type values per attribute.
      */
     return (static_cast<std::uint64_t>(attribute_id) * 100 +
             static_cast<std::uint64_t>(attribute_type));
   }
 
-  constexpr auto get_type_size() const -> std::size_t {
-    return get_metric_data_type_size(m_attribute_type);
+  auto get_type_size() const -> std::size_t {
+    return get_metric_data_type_size(get_canonical_type());
   }
 
  private:
   std::uint64_t m_unique_id;
-  AMDGpuDynamicMetricsVersion_t m_availability_version;
+  std::set<AMDGpuMetricAttributeType_t> m_accepted_types;
 };
 
 /*
@@ -743,8 +787,9 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "Accumulation Counter", "Counter for accumulated metrics",
              details::AMDGpuMetricAttributeId_t::ACCUMULATION_COUNTER,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
-             details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
+             details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR,
+             {details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+              details::AMDGpuMetricAttributeType_t::TYPE_UINT64}),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
     {details::AMDGpuMetricAttributeId_t::PROCHOT_RESIDENCY_ACC,
