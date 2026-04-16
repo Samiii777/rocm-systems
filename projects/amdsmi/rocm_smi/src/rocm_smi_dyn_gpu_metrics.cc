@@ -218,6 +218,18 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data, std::size_
 
     const auto dec = amdgpu_metrics_decode_attr(enc);
 
+    // Validate attr_type before casting: the field is 4 bits (0–15) but only 8 values
+    // (0–7) are defined in AMDGpuMetricAttributeType_t. An unknown type means we cannot
+    // determine the payload size, so we cannot safely advance the cursor — abort parse.
+    constexpr uint64_t kMaxValidAttrType =
+        static_cast<uint64_t>(AMDGpuMetricAttributeType_t::TYPE_INT64);
+    if (dec.m_attr_type > kMaxValidAttrType) {
+      ss << __PRETTY_FUNCTION__ << " | Unrecognized attr_type: " << dec.m_attr_type
+         << " — cannot determine payload size, aborting parse";
+      LOG_WARN(ss);
+      return RSMI_STATUS_UNEXPECTED_DATA;
+    }
+
     const auto attr_type = static_cast<AMDGpuMetricAttributeType_t>(dec.m_attr_type);
     const auto attr_id = static_cast<AMDGpuMetricAttributeId_t>(dec.m_attr_id);
     const auto instances = static_cast<uint64_t>(dec.m_attr_instance);
@@ -242,22 +254,18 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data, std::size_
          << static_cast<std::underlying_type_t<AMDGpuMetricAttributeType_t>>(attr_type) << ")";
 
       if (status == RSMI_STATUS_NOT_SUPPORTED) {
-        const auto& schema_inst = AMDGpuMetricsBaseSchema.at(attr_id).m_instance;
-        ss << " | Type mismatch: got " << attr_type_to_string(attr_type) << ", accepted [";
-        bool first = true;
-        // Iterate accepted types via accepts_type probe across all known types
-        for (const auto accepted :
-             {AMDGpuMetricAttributeType_t::TYPE_UINT8, AMDGpuMetricAttributeType_t::TYPE_INT8,
-              AMDGpuMetricAttributeType_t::TYPE_UINT16, AMDGpuMetricAttributeType_t::TYPE_INT16,
-              AMDGpuMetricAttributeType_t::TYPE_UINT32, AMDGpuMetricAttributeType_t::TYPE_INT32,
-              AMDGpuMetricAttributeType_t::TYPE_UINT64, AMDGpuMetricAttributeType_t::TYPE_INT64}) {
-          if (schema_inst.accepts_type(accepted)) {
+        if (const auto sit = AMDGpuMetricsBaseSchema.find(attr_id);
+            sit != AMDGpuMetricsBaseSchema.end()) {
+          const auto& schema_inst = sit->second.m_instance;
+          ss << " | Type mismatch: got " << attr_type_to_string(attr_type) << ", accepted [";
+          bool first = true;
+          for (const auto accepted : schema_inst.get_accepted_types()) {
             if (!first) ss << ", ";
             ss << attr_type_to_string(accepted);
             first = false;
           }
+          ss << "]";
         }
-        ss << "]";
       }
 
       ss << " | Returning = " << getRSMIStatusString(status) << " |";
@@ -316,9 +324,11 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data, std::size_
 
     val = std::move(*mv);  // safely set val
 
-    // If the driver emitted a narrower type than the schema's canonical type,
-    // widen the value so that m_instance.m_attribute_type and the stored variant
-    // alternative are always consistent.
+    // If the driver emitted a type that differs from the schema's canonical type,
+    // convert the value to the canonical type so that m_instance.m_attribute_type
+    // and the stored variant alternative are always consistent.
+    // For the current schema, this is always a widening (e.g. UINT32 -> UINT64 for
+    // ACCUMULATION_COUNTER on older drivers).
     if (attr_type != inst.m_attribute_type) {
       val = std::visit(
           [canonical_type = inst.m_attribute_type](auto v) -> AMDGpuMetricAttributeValue_t {
@@ -339,8 +349,15 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data, std::size_
                 return widen_value<std::uint64_t>(v);
               case AMDGpuMetricAttributeType_t::TYPE_INT64:
                 return widen_value<std::int64_t>(v);
-              default:
+              default: {
+                std::ostringstream ss;
+                ss << __PRETTY_FUNCTION__ << " | Unhandled canonical_type in widening switch: "
+                   << static_cast<std::underlying_type_t<AMDGpuMetricAttributeType_t>>(
+                          canonical_type)
+                   << " — variant/m_attribute_type invariant may be violated.";
+                LOG_ERROR(ss);
                 return AMDGpuMetricAttributeValue_t{v};
+              }
             }
           },
           val);

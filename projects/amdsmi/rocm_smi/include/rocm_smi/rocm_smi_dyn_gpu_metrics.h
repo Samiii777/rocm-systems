@@ -31,11 +31,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <shared_mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -45,6 +46,7 @@
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_common.h"
+#include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd::smi {
 
@@ -432,12 +434,31 @@ struct AMDGpuMetricAttributeInstance_t {
   }
 
   /*
-   *  Returns the canonical (widest) accepted attribute type, determined by sizeof.
-   *  For single-type attributes, this is the only accepted type.
-   *  For multi-type attributes (e.g. UINT32|UINT64), this is the widest by byte size.
-   *  Using sizeof rather than enum ordinal avoids relying on enum declaration order.
+   *  Returns the canonical accepted type — the widest by byte size as reported
+   *  by get_metric_data_type_size(). For single-type attributes this is the only
+   *  accepted type. For multi-type attributes (e.g. {TYPE_UINT32, TYPE_UINT64})
+   *  this is TYPE_UINT64 (8 bytes > 4 bytes).
+   *
+   *  Tie-breaking: AMDGpuMetricAttributeType_t enumerators have no explicit values
+   *  and are numbered 0–7 in declaration order (TYPE_UINT8=0, TYPE_INT8=1, ...,
+   *  TYPE_UINT32=4, TYPE_INT32=5, ...). m_accepted_types is a std::vector so iteration
+   *  order matches insertion order (i.e. the order of the initializer list).
+   *  When two accepted types have the same byte size (e.g. TYPE_UINT32 and TYPE_INT32,
+   *  both 4 bytes), std::max_element returns the first equal-max element it encounters —
+   *  i.e. whichever appears first in the initializer list.
+   *  In practice today's only multi-type entry is {TYPE_UINT32, TYPE_UINT64} where
+   *  sizes differ unambiguously, so ties do not arise.
    */
   auto get_canonical_type() const -> AMDGpuMetricAttributeType_t {
+    if (m_accepted_types.empty()) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__
+         << " | Called on AMDGpuMetricAttributeInstance_t with no accepted types"
+         << " — programming error in schema definition. Returning sentinel.";
+      LOG_ERROR(ss);
+      return static_cast<AMDGpuMetricAttributeType_t>(
+          std::numeric_limits<std::underlying_type_t<AMDGpuMetricAttributeType_t>>::max());
+    }
     return *std::max_element(m_accepted_types.begin(), m_accepted_types.end(),
                              [](AMDGpuMetricAttributeType_t a, AMDGpuMetricAttributeType_t b) {
                                return get_metric_data_type_size(a) < get_metric_data_type_size(b);
@@ -448,14 +469,23 @@ struct AMDGpuMetricAttributeInstance_t {
    *  Returns true if the driver-emitted type is accepted by this attribute instance.
    */
   auto accepts_type(AMDGpuMetricAttributeType_t type) const -> bool {
-    return m_accepted_types.count(type) > 0;
+    return std::find(m_accepted_types.begin(), m_accepted_types.end(), type) !=
+           m_accepted_types.end();
+  }
+
+  /*
+   *  Returns the full list of accepted types for this attribute instance.
+   *  Use this to iterate accepted types rather than probing each possible enum value.
+   */
+  auto get_accepted_types() const -> const std::vector<AMDGpuMetricAttributeType_t>& {
+    return m_accepted_types;
   }
 
   /*
    *  Get the unique ID of the metric instance.
    */
   auto get_unique_attribute_id(AMDGpuMetricAttributeId_t attribute_id,
-                               AMDGpuMetricAttributeType_t attribute_type) -> std::uint64_t {
+                               AMDGpuMetricAttributeType_t attribute_type) const -> std::uint64_t {
     /*
      *  The unique ID is calculated based on the attribute ID and type.
      *  This allows for a unique identifier for each metric instance.
@@ -478,7 +508,7 @@ struct AMDGpuMetricAttributeInstance_t {
 
  private:
   std::uint64_t m_unique_id;
-  std::set<AMDGpuMetricAttributeType_t> m_accepted_types;
+  std::vector<AMDGpuMetricAttributeType_t> m_accepted_types;
 };
 
 /*
