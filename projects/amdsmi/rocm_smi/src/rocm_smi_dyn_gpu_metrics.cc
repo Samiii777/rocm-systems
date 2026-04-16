@@ -135,6 +135,21 @@ static inline std::optional<std::vector<T>> read_vector(Cursor& c, std::size_t c
   return out;
 }
 
+// Widen a scalar value to a wider integral type
+template <typename To, typename From>
+static inline AMDGpuMetricAttributeValue_t widen_value(From v) {
+  return AMDGpuMetricAttributeValue_t{static_cast<To>(v)};
+}
+
+// Widen a vector of values to a wider integral element type
+template <typename To, typename From, typename A>
+static inline AMDGpuMetricAttributeValue_t widen_value(const std::vector<From, A>& v) {
+  std::vector<To> w;
+  w.reserve(v.size());
+  for (auto e : v) w.push_back(static_cast<To>(e));
+  return AMDGpuMetricAttributeValue_t{std::move(w)};
+}
+
 // Template to fill AMDGpuMetricAttributeValue_t with either a scalar<T> or vector<T>
 template <typename T>
 static inline std::optional<AMDGpuMetricAttributeValue_t> read_metric_value(Cursor& c,
@@ -300,6 +315,37 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data, std::size_
     }
 
     val = std::move(*mv);  // safely set val
+
+    // If the driver emitted a narrower type than the schema's canonical type,
+    // widen the value so that m_instance.m_attribute_type and the stored variant
+    // alternative are always consistent.
+    if (attr_type != inst.m_attribute_type) {
+      val = std::visit(
+          [canonical_type = inst.m_attribute_type](auto v) -> AMDGpuMetricAttributeValue_t {
+            switch (canonical_type) {
+              case AMDGpuMetricAttributeType_t::TYPE_UINT8:
+                return widen_value<std::uint8_t>(v);
+              case AMDGpuMetricAttributeType_t::TYPE_INT8:
+                return widen_value<std::int8_t>(v);
+              case AMDGpuMetricAttributeType_t::TYPE_UINT16:
+                return widen_value<std::uint16_t>(v);
+              case AMDGpuMetricAttributeType_t::TYPE_INT16:
+                return widen_value<std::int16_t>(v);
+              case AMDGpuMetricAttributeType_t::TYPE_UINT32:
+                return widen_value<std::uint32_t>(v);
+              case AMDGpuMetricAttributeType_t::TYPE_INT32:
+                return widen_value<std::int32_t>(v);
+              case AMDGpuMetricAttributeType_t::TYPE_UINT64:
+                return widen_value<std::uint64_t>(v);
+              case AMDGpuMetricAttributeType_t::TYPE_INT64:
+                return widen_value<std::int64_t>(v);
+              default:
+                return AMDGpuMetricAttributeValue_t{v};
+            }
+          },
+          val);
+    }
+
     const uint32_t row_index = static_cast<uint32_t>(metrics_data.size());
     metrics_data.emplace_back(inst, val);
     offsets.try_emplace(entry_start, row_index);

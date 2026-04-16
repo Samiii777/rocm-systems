@@ -392,7 +392,8 @@ struct AMDGpuMetricAttributeInstance_t {
    *
    *    Use when the driver has changed the data width of an attribute across versions
    *    and the library must accept both. The canonical (output) type is the widest entry
-   *    in the set (highest enum value). Older driver versions that emit a narrower type
+   *    in the set by metric data type size, as determined by get_canonical_type().
+   *    Older driver versions that emit a narrower type
    *    are still accepted and parsed correctly.
    *
    *    Example: ACCUMULATION_COUNTER was TYPE_UINT32 in older drivers and TYPE_UINT64
@@ -473,9 +474,7 @@ struct AMDGpuMetricAttributeInstance_t {
             static_cast<std::uint64_t>(attribute_type));
   }
 
-  auto get_type_size() const -> std::size_t {
-    return get_metric_data_type_size(get_canonical_type());
-  }
+  auto get_type_size() const -> std::size_t { return get_metric_data_type_size(m_attribute_type); }
 
  private:
   std::uint64_t m_unique_id;
