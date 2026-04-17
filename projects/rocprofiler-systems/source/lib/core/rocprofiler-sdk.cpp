@@ -633,6 +633,14 @@ get_rocm_events()
         " ,;\t\n");
 }
 
+std::vector<std::string>
+get_gpu_perf_counters()
+{
+    return tim::delimit(get_setting_value<std::string>("ROCPROFSYS_GPU_PERF_COUNTERS")
+                            .value_or(std::string{}),
+                        " ,;\t\n");
+}
+
 bool
 get_group_by_queue(void)
 {
