@@ -76,6 +76,7 @@ constexpr std::string_view CPU_FREQ_ENABLED     = "ROCPROFSYS_CPU_FREQ_ENABLED";
 // --- Domains: ROCm ---
 constexpr std::string_view ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
 constexpr std::string_view ROCM_GROUP_BY_QUEUE = "ROCPROFSYS_ROCM_GROUP_BY_QUEUE";
+constexpr std::string_view GPU_PERF_COUNTERS   = "ROCPROFSYS_GPU_PERF_COUNTERS";
 
 // --- Domains: CPU ---
 constexpr std::string_view CPU_FREQ    = "ROCPROFSYS_CPU_FREQ";

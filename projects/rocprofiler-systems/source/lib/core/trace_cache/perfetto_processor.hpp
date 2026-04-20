@@ -57,6 +57,7 @@ private:
     void       setup_perfetto();
     void       start_session();
     void       stop_session();
+    void       initialize_pmc_track_map();
     void       flush(bool& perfetto_output_error);
     char_vec_t get_session_data();
 
