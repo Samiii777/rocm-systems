@@ -2411,13 +2411,30 @@ hsa_status_t Runtime::Load() {
 
   BindErrorHandlers();
 
+#if defined(__APPLE__)
+  // TODO(macos-port): AmdHsaCodeLoader's ReaderWriterLock member null-derefs
+  // inside std::make_shared<std::mutex> during construction (likely an
+  // interaction between -fno-rtti and libc++ condition_variable_any on
+  // macOS 26). Skip loader init on Darwin for now — we can't actually
+  // load code objects without a GPU agent anyway.
+  loader_ = nullptr;
+#else
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
+#endif
 
   // Load extensions
   LoadExtensions();
 
-  // Probe aqlprofile availability once and cache the result
+  // Probe aqlprofile availability once and cache the result.
+#if defined(__APPLE__)
+  // kAqlProfileLib ends in ".so"; Darwin's dlopen handles missing libs
+  // fine but macOS 26's PrebuiltLoader cache has crashed for us on
+  // non-existent paths. Skip the probe — aqlprofile isn't supported on
+  // the Darwin eGPU port yet.
+  aqlprofile_lib_ = nullptr;
+#else
   aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+#endif
 
   // Initialize per GPU scratch, blits, and trap handler
   for (core::Agent* agent : gpu_agents_) {
