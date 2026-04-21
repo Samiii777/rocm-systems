@@ -89,15 +89,20 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     # Verify that for each expected pattern, at least one file exists
     actual_files = set(file_dict.keys())
     for expected_pattern in PC_SAMPLING_HOST_TRAP_FILES:
-        if '*' in expected_pattern:
+        if "*" in expected_pattern:
             # Check if any actual file matches the pattern
-            matching_files = [f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)]
-            assert len(matching_files) > 0, \
-                f"Expected at least 1 file matching pattern '{expected_pattern}', found 0"
+            matching_files = [
+                f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)
+            ]
+            assert len(matching_files) > 0, (
+                f"Expected at least 1 file matching pattern "
+                f"'{expected_pattern}', found 0"
+            )
         else:
             # Exact filename match
-            assert expected_pattern in actual_files, \
+            assert expected_pattern in actual_files, (
                 f"Expected file '{expected_pattern}' not found in output"
+            )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -140,15 +145,20 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
     # Verify that for each expected pattern, at least one file exists
     actual_files = set(file_dict.keys())
     for expected_pattern in PC_SAMPLING_STOCHASTIC_FILES:
-        if '*' in expected_pattern:
+        if "*" in expected_pattern:
             # Check if any actual file matches the pattern
-            matching_files = [f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)]
-            assert len(matching_files) > 0, \
-                f"Expected at least 1 file matching pattern '{expected_pattern}', found 0"
+            matching_files = [
+                f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)
+            ]
+            assert len(matching_files) > 0, (
+                f"Expected at least 1 file matching pattern "
+                f"'{expected_pattern}', found 0"
+            )
         else:
             # Exact filename match
-            assert expected_pattern in actual_files, \
+            assert expected_pattern in actual_files, (
                 f"Expected file '{expected_pattern}' not found in output"
+            )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -269,15 +279,20 @@ def test_pc_sampling_profile_then_analyze(
     # Verify that for each expected pattern, at least one file exists
     actual_files = set(file_dict.keys())
     for expected_pattern in PC_SAMPLING_HOST_TRAP_FILES:
-        if '*' in expected_pattern:
+        if "*" in expected_pattern:
             # Check if any actual file matches the pattern
-            matching_files = [f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)]
-            assert len(matching_files) > 0, \
-                f"Expected at least 1 file matching pattern '{expected_pattern}', found 0"
+            matching_files = [
+                f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)
+            ]
+            assert len(matching_files) > 0, (
+                f"Expected at least 1 file matching pattern "
+                f"'{expected_pattern}', found 0"
+            )
         else:
             # Exact filename match
-            assert expected_pattern in actual_files, \
+            assert expected_pattern in actual_files, (
                 f"Expected file '{expected_pattern}' not found in output"
+            )
 
     code = binary_handler_analyze_rocprof_compute(
         [
