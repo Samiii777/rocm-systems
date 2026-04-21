@@ -53,6 +53,7 @@
 #include "suites/functional/memory_basic.h"
 #include "suites/functional/memory_access.h"
 #include "suites/functional/ipc.h"
+#include "suites/functional/ipc_sdma.h"
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
@@ -257,6 +258,13 @@ TEST(rocrtstFunc, IPC) {
   RUN_IF_NOT_EMU_MODE(
     IPCTest ipc;
     RunGenericTest(&ipc);
+  );
+}
+
+TEST(rocrtstFunc, IPC_SDMA) {
+  RUN_IF_NOT_EMU_MODE(
+    IPCSDMATest ipc_sdma;
+    RunGenericTest(&ipc_sdma);
   );
 }
 
