@@ -1868,6 +1868,8 @@ class Device : public RuntimeObject {
    */
   bool customHostAllocator() const { return settings().customHostAllocator_ == 1; }
 
+  virtual void* getOrCreateHostcallBuffer() { return nullptr; }
+
   /**
    * @copydoc amd::Context::hostAlloc
    */
