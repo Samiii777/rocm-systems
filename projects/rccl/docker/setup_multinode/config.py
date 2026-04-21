@@ -92,6 +92,9 @@ class Config(object):
         self.verbose = bool(os.environ.get("VERBOSE", ""))
         self.force_rebuild = False
         self.extra_volumes = []  # type: List[str]
+        self.dockerfile = os.environ.get(
+            "DOCKERFILE", "Dockerfile.Multinode.Ubuntu"
+        )
 
         # Parallelism for multi-node operations (launch_all, stop_all, verify)
         self.parallel = 16

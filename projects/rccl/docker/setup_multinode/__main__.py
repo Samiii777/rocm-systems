@@ -45,7 +45,7 @@ Examples:
 Environment Variables (alternative to flags):
   ROCM_IMAGE, CONTAINER_NAME, SHARED_DIR, BUILDS_DIR, SSH_KEY_DIR,
   SSH_KEY, SSH_AUTHORIZED_KEYS, HOSTFILE, SSH_PORT, GPUS,
-  POST_SETUP_DIR, HOST_SSH_PORT, VERBOSE
+  POST_SETUP_DIR, HOST_SSH_PORT, DOCKERFILE, VERBOSE
 
 Path expansion:
   All path options support ~ and $VAR / ${VAR} expansion.
@@ -152,6 +152,13 @@ Path expansion:
 
     # --- Modifiers ---
     parser.add_argument(
+        "--dockerfile",
+        help=(
+            "Dockerfile to use for image build "
+            "(default: DOCKERFILE env or Dockerfile.Multinode.Ubuntu)"
+        ),
+    )
+    parser.add_argument(
         "--rebuild", action="store_true",
         help="Force image rebuild and replace existing containers",
     )
@@ -213,6 +220,8 @@ def _apply_cli_args(cfg, args):
         cfg.ssh.authorized_keys = args.ssh_authorized_keys
     if args.ssh_keygen:
         cfg.ssh.keygen = True
+    if args.dockerfile is not None:
+        cfg.dockerfile = args.dockerfile
     if args.rebuild:
         cfg.force_rebuild = True
     if args.host_ssh_port is not None:
@@ -264,6 +273,7 @@ def _dump_config(cfg):
     log_verbose("ssh.keygen={}".format(cfg.ssh.keygen))
     log_verbose("action={}".format(cfg.action.value))
     log_verbose("host_ssh_port={}".format(cfg.host_ssh_port))
+    log_verbose("dockerfile={}".format(cfg.dockerfile))
     log_verbose("force_rebuild={}".format(cfg.force_rebuild))
     log_verbose("parallel={}".format(cfg.parallel))
     log_verbose("runtime={}".format(cfg.runtime_name))

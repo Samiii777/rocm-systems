@@ -118,6 +118,8 @@ def _build_forward_args(cfg):
     ]
     if cfg.gpus_explicit:
         args += ["--gpus", cfg.gpus]
+    if cfg.dockerfile != "Dockerfile.Multinode.Ubuntu":
+        args += ["--dockerfile", cfg.dockerfile]
     if cfg.force_rebuild:
         args.append("--rebuild")
     if cfg.verbose:

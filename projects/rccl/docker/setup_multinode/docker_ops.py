@@ -101,7 +101,7 @@ class DockerRuntime(ContainerRuntime):
                 "--build-arg", "SSH_PORT={}".format(self.cfg.ssh.port),
                 "-t", self.cfg.image_tag,
                 "-f", os.path.join(
-                    self.cfg.script_dir, "Dockerfile.Multinode.Ubuntu"
+                    self.cfg.script_dir, self.cfg.dockerfile
                 ),
             ]
 
