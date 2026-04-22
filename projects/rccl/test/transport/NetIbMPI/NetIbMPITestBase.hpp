@@ -1,10 +1,11 @@
 /*************************************************************************
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
+#define RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -618,4 +619,6 @@ protected:
     }
 };
 
-#endif // MPI_TESTS_ENABLED
+#endif /* MPI_TESTS_ENABLED */
+
+#endif /* RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_ */
