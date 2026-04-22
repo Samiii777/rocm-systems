@@ -880,9 +880,9 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_RANK_FILTER_LOGS",
-        "Ranks for which console output is generated. Values should be separated by commas "
-        "and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables output "
-        "for all ranks",
+        "Ranks for which console output is generated. Values should be separated by "
+        "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables "
+        "output for all ranks",
         std::string{}, "data", "io", "advanced");
 
     // set the defaults
