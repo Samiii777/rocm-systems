@@ -13,8 +13,9 @@
 #
 # See setup_multinode.sh for a one-command build + launch workflow.
 
-ARG ROCM_IMAGE=alinux3-rocm:latest
-FROM ${ROCM_IMAGE}
+ARG ROCM_IMAGE_NAME=rocm/dev-almalinux-8
+ARG ROCM_IMAGE_TAG=7.2.2-complete
+FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
 
 ARG SSH_PORT=2224
 ARG CONTAINER_USER=alinux
