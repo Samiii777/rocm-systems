@@ -73,6 +73,7 @@ set(TTD_PUBLIC_CXX_HEADERS
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/code_printing.hpp
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/common.hpp
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/disassembly.hpp
+    ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/funcmap.hpp
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/segment.hpp)
 
 # --- COMGR support (optional) ---

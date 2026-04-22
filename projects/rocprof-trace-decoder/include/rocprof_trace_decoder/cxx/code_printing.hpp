@@ -23,6 +23,7 @@
 #pragma once
 
 #include "disassembly.hpp"
+#include "funcmap.hpp"
 #include "segment.hpp"
 
 #include <hsa/amd_hsa_elf.h>
@@ -36,6 +37,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprof_trace_decoder
@@ -73,6 +75,58 @@ public:
             m_symbol_map = disassembly->GetKernelMap();  // Can throw
         } catch(...)
         {}
+
+        // Best-effort parse of `.sqtt_funcmap` (emitted by the
+        // sqtt_instrumentation LLVM pass). Absence is the common case for
+        // non-instrumented binaries and produces no diagnostic. Any failure
+        // here must not break disassembly.
+        try
+        {
+            auto section_bytes =
+                extract_elf_section(codeobj_data, codeobj_size, ".sqtt_funcmap",
+                                    m_funcmap.diagnostics);
+            if(section_bytes)
+            {
+                Funcmap parsed = parse_funcmap_section(*section_bytes);
+                // Carry forward extraction-time diagnostics into the funcmap.
+                if(!m_funcmap.diagnostics.empty())
+                {
+                    parsed.diagnostics.insert(parsed.diagnostics.begin(),
+                                              m_funcmap.diagnostics.begin(),
+                                              m_funcmap.diagnostics.end());
+                }
+                m_funcmap = std::move(parsed);
+
+                // Resolve vaddrs for F/K rows by name via the FUNC symbol map.
+                std::unordered_map<std::string, uint64_t> name_to_vaddr;
+                name_to_vaddr.reserve(m_symbol_map.size());
+                for(const auto& [vaddr, sym] : m_symbol_map)
+                    name_to_vaddr.emplace(sym.name, vaddr);
+
+                for(auto& entry_ptr : m_funcmap.entries)
+                {
+                    if(!entry_ptr) continue;
+                    if(entry_ptr->kind != FuncmapEntryKind::Function
+                       && entry_ptr->kind != FuncmapEntryKind::Kernel)
+                        continue;
+                    auto it = name_to_vaddr.find(entry_ptr->name);
+                    if(it == name_to_vaddr.end()) continue;
+
+                    // FuncmapEntry is shared as `const`; rewrite via a fresh node
+                    // and update by_id in lockstep so consumers see consistent state.
+                    auto updated  = std::make_shared<FuncmapEntry>(*entry_ptr);
+                    updated->vaddr = it->second;
+                    if(updated->kind != FuncmapEntryKind::Kernel)
+                    {
+                        auto bid = m_funcmap.by_id.find(updated->id);
+                        if(bid != m_funcmap.by_id.end() && bid->second == entry_ptr)
+                            bid->second = updated;
+                    }
+                    entry_ptr = std::move(updated);
+                }
+            }
+        } catch(...)
+        {}
     }
     ~CodeobjDecoderComponent() = default;
 
@@ -94,7 +148,10 @@ public:
         return inst;
     }
 
+    const Funcmap& getFuncmap() const { return m_funcmap; }
+
     std::map<uint64_t, SymbolInfo>            m_symbol_map{};
+    Funcmap                                   m_funcmap{};
     std::vector<std::shared_ptr<Instruction>> instructions{};
     std::unique_ptr<DisassemblyInstance>      disassembly{};
 };
@@ -171,6 +228,12 @@ public:
         if(!decoder) throw std::exception();
         return decoder->m_symbol_map;
     }
+
+    const Funcmap& getFuncmap() const
+    {
+        if(!decoder) throw std::exception();
+        return decoder->getFuncmap();
+    }
     const uint64_t load_addr;
 
 private:
@@ -236,6 +299,29 @@ public:
         } catch(std::out_of_range&)
         {}
         return nullptr;
+    }
+
+    // Lookup a marker by ID within a specific code-object. Returns nullptr if
+    // either the codeobj or the ID is unknown — callers should treat absence
+    // as "no funcmap info" rather than an error.
+    Funcmap::EntryPtr getMarker(code_object_id_t id, uint32_t marker_id) const
+    {
+        auto it = decoders.find(id);
+        if(it == decoders.end()) return nullptr;
+        try
+        {
+            return it->second->getFuncmap().find(marker_id);
+        } catch(...)
+        {
+            return nullptr;
+        }
+    }
+
+    // Throws std::out_of_range when `id` is unknown (matches the lookup
+    // pattern used by getSymbolName via decoders.at(id)).
+    const Funcmap& getFuncmap(code_object_id_t id) const
+    {
+        return decoders.at(id)->getFuncmap();
     }
 
 protected:
@@ -345,6 +431,58 @@ public:
         {
             return {};
         }
+    }
+
+    // Marker IDs are scoped per-codeobj. If multiple loaded code-objects
+    // happen to share an ID, all hits are returned — there is no defensible
+    // tiebreaker at this layer; the caller should disambiguate (e.g. by
+    // correlating to the active kernel's code-object).
+    std::vector<std::pair<code_object_id_t, Funcmap::EntryPtr>>
+    findMarkerAny(uint32_t marker_id) const
+    {
+        std::vector<std::pair<code_object_id_t, Funcmap::EntryPtr>> out;
+        for(const auto& [id, dec] : decoders)
+        {
+            try
+            {
+                if(auto entry = dec->getFuncmap().find(marker_id))
+                    out.emplace_back(id, std::move(entry));
+            } catch(...)
+            {}
+        }
+        return out;
+    }
+
+    // Returns the unique non-zero `W:` value across all loaded code-objects,
+    // or 0 if none reported a wave size or the values disagree (in which
+    // case a diagnostic is also emitted to std::cerr — wave size is
+    // hardware-uniform per trace, so disagreement is a real misconfiguration).
+    uint32_t getWaveSize() const
+    {
+        uint32_t agreed = 0;
+        for(const auto& [id, dec] : decoders)
+        {
+            uint32_t w = 0;
+            try
+            {
+                w = dec->getFuncmap().wave_size;
+            } catch(...)
+            {
+                continue;
+            }
+            if(w == 0) continue;
+            if(agreed == 0)
+            {
+                agreed = w;
+            }
+            else if(agreed != w)
+            {
+                std::cerr << "rocprof-trace-decoder: .sqtt_funcmap wave size disagreement ("
+                          << agreed << " vs " << w << " from codeobj id " << id << ")\n";
+                return 0;
+            }
+        }
+        return agreed;
     }
 
 private:

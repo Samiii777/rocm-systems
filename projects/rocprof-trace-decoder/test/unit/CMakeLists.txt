@@ -38,7 +38,8 @@ set(TEST_FILES
     gfx11_test.cpp
     gfx12_test.cpp
     token_stream_test.cpp
-    sqttparser_test.cpp)
+    sqttparser_test.cpp
+    funcmap_test.cpp)
 
 # Function to create a test executable with specific sanitizer options Re-list library sources for sanitizer builds
 # (must be recompiled with sanitizer flags)
