@@ -45,6 +45,9 @@ def install_ssh_keys(cfg):
 
     if os.path.isfile(id_rsa):
         log("  SSH keys exist at {}".format(key_dir))
+        pub_key = id_rsa + ".pub"
+        if os.path.isfile(pub_key):
+            _add_to_host_authorized_keys(pub_key)
         return
 
     if cfg.ssh.key:

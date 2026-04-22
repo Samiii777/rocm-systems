@@ -48,10 +48,10 @@ def error(msg):
 # ---------------------------------------------------------------------------
 def expand_path(p):
     # type: (str) -> str
-    """Expand ``~`` and ``$VAR`` / ``${VAR}`` in a path string."""
+    """Expand ``~``, ``$VAR`` / ``${VAR}``, and resolve to absolute path."""
     if not p:
         return p
-    return os.path.expandvars(os.path.expanduser(p))
+    return os.path.abspath(os.path.expandvars(os.path.expanduser(p)))
 
 
 # ---------------------------------------------------------------------------
