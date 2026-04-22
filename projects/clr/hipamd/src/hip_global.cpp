@@ -255,8 +255,12 @@ hipError_t Var::AllocateManagedVarPtr() {
   void** pointer = static_cast<void**>(managedVarPtr_);
   // check if it is deffered allocation
   if (!allocFlag_) {
+    // If the device does not support HMM, we cannot use the host pointer,
+    // since the device pointer could map to a different address.
+    const bool dev_supports_hmm = hip::host_context->devices()[0]->info_.hmmSupported_;
+    const bool use_host_ptr = dev_supports_hmm ? true : false;
+
     // Allocate managed memory for this var
-    const bool use_host_ptr = true;
     IHIP_RETURN_ONFAIL(ihipMallocManaged(pointer, size_, align_, use_host_ptr));
     allocFlag_ = true;
   }

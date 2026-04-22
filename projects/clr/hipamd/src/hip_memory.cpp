@@ -654,6 +654,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   if (src == dst && kind == hipMemcpyDefault) {
     return hipSuccess;
   }
+
   size_t sOffset = 0;
   amd::Memory* srcMemory = getMemoryObject(src, sOffset);
   size_t dOffset = 0;
@@ -784,6 +785,10 @@ hipError_t hipMemcpy_common(void* dst, const void* src, size_t sizeBytes, hipMem
   if (hip_stream == nullptr) {
     return hipErrorInvalidValue;
   }
+
+  HIP_RETURN_ONFAIL(
+      PlatformState::Instance().StatCO().InitManagedVarDevicePtr(hip_stream->DeviceId()));
+
   return ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream);
 }
 
@@ -3104,6 +3109,9 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
   if (dst == nullptr) {
     return hipErrorInvalidValue;
   }
+
+  int deviceId = hip::getStream(stream)->DeviceId();
+  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().InitManagedVarDevicePtr(deviceId));
 
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(dst, offset);

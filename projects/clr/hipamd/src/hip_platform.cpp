@@ -246,23 +246,7 @@ void __hipRegisterManagedVar(
     return false;
 #else
     const char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
-    const bool env_enabled = var ? atoi(var) != 0 : true;
-    if (!env_enabled) {
-      return false;
-    }
-
-    // Require HMM support on every device.
-    // Deferred loading upgrades the managed pointer later with
-    // ihipMallocManaged(use_host_ptr=true). On non-HMM systems the
-    // user-visible VA stays host-only and is not GPU-accessible, so kernels
-    // touching the managed pointer page-fault.
-    HIP_INIT_VOID();
-    for (const auto& hip_device : g_devices) {
-      if (!hip_device->devices()[0]->info().hmmSupported_) {
-        return false;
-      }
-    }
-    return true;
+    return var ? atoi(var) != 0 : true;
 #endif
   }();
 
