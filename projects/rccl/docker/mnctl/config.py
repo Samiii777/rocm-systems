@@ -107,6 +107,12 @@ class Config(object):
             port=int(os.environ.get("MNCTL_SSH_PORT", "2224")),
         )
 
+        # NIC type: "mellanox", "ainic", or any custom string
+        self.nic_type = os.environ.get("MNCTL_NIC_TYPE", "mellanox")
+
+        # Resolved from the Dockerfile's ARG CONTAINER_USER (set by __main__)
+        self.container_user = "ubuntu"
+
         # Points to the docker/ directory (parent of the mnctl package)
         self.script_dir = os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))

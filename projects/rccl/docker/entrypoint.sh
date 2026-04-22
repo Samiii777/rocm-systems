@@ -24,6 +24,7 @@ set -e
 SSH_PORT="${SSH_PORT:-2224}"
 SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/opt/ssh-keys}"
 CONTAINER_USER="${CONTAINER_USER:-ubuntu}"
+NIC_TYPE="${NIC_TYPE:-mellanox}"
 VERBOSE="${VERBOSE:-}"
 POST_SETUP_DIR="${POST_SETUP_DIR:-/opt/post-setup}"
 
@@ -171,6 +172,13 @@ run_post_setup() {
         echo "  Post-setup: setup.sh (SHA256: ${hash:0:16}...)"
 
         local marker="/opt/builds/.post-setup.${hash:0:16}.done"
+
+        # --rebuild clears stale markers so post-setup always re-runs
+        if [[ "${FORCE_POST_SETUP:-}" == "1" ]] && [[ -f "${marker}" ]]; then
+            echo "  Post-setup: clearing stale marker (FORCE_POST_SETUP=1)"
+            rm -f "${marker}"
+        fi
+
         if [[ -f "${marker}" ]]; then
             echo "  Post-setup already completed (cached)"
             log_verbose "Marker: ${marker}"
@@ -182,26 +190,18 @@ run_post_setup() {
         cp -a "${POST_SETUP_DIR}/." "${work_dir}/"
         chmod +x "${work_dir}/setup.sh"
 
-        local setup_log="/tmp/post-setup.log"
+        echo "  Post-setup: running setup.sh ..."
         local rc=0
-        bash "${work_dir}/setup.sh" > "${setup_log}" 2>&1 || rc=$?
+        ( set -o pipefail; bash "${work_dir}/setup.sh" 2>&1 | sed 's/^/    [post-setup] /' ) || rc=$?
 
         if [[ "${rc}" -eq 0 ]]; then
             touch "${marker}" 2>/dev/null || true
             echo "  [OK] Post-setup completed"
         else
             echo "  [FAIL] Post-setup exited with code ${rc}"
-            tail -20 "${setup_log}" | sed 's/^/    /'
         fi
 
-        if [[ -n "${VERBOSE}" ]] && [[ -f "${setup_log}" ]]; then
-            log_verbose "Post-setup log:"
-            while IFS= read -r line; do
-                log_verbose "  ${line}"
-            done < "${setup_log}"
-        fi
-
-        rm -rf "${work_dir}" "${setup_log}"
+        rm -rf "${work_dir}"
     fi
 }
 
@@ -218,6 +218,7 @@ if [[ -n "${VERBOSE}" ]]; then
     log_verbose "  HOST_UID=${HOST_UID:-1000}  HOST_GID=${HOST_GID:-1000}"
     log_verbose "  LAUNCH_SCRIPT=${LAUNCH_SCRIPT:-}"
     log_verbose "  POST_SETUP_DIR=${POST_SETUP_DIR}"
+    log_verbose "  NIC_TYPE=${NIC_TYPE}"
     log_verbose "  GPUS=${GPUS:-}"
     log_verbose "Mounted volumes:"
     mount | grep -E '/opt/(shared|builds|ssh-keys)' | while read -r line; do
@@ -247,6 +248,22 @@ if [[ -n "${VERBOSE}" ]]; then
     log_verbose "sshd process: $(ps aux | grep '[s]shd' | head -1)"
 else
     /usr/sbin/sshd -p"${SSH_PORT}"
+fi
+
+echo "  NIC type: ${NIC_TYPE}"
+
+# NIC-specific setup (failures warn but do not block post-setup / sshd)
+if [[ "${NIC_TYPE}" == "ainic" ]]; then
+    if [[ -x /opt/install_ainic_driver.sh ]]; then
+        if ! /opt/install_ainic_driver.sh; then
+            echo "  WARNING: AINIC driver install failed (see output above)"
+            echo "           Continuing with post-setup and idle..."
+        fi
+    fi
+elif [[ "${NIC_TYPE}" == "mellanox" ]]; then
+    log_verbose "Mellanox: using host RDMA libs (bind-mounted by mnctl)"
+else
+    log_verbose "Custom NIC type '${NIC_TYPE}': no built-in driver setup"
 fi
 
 run_post_setup

@@ -2,8 +2,8 @@
 
 The host-setup phase creates shared directories and installs SSH keys.
 launch_all / stop_all fan out to every node in the hostfile by spawning
-all SSH commands as concurrent subprocesses (Popen), then polling for
-completion.  No threads are used — the OS handles parallelism.
+all SSH commands as concurrent subprocesses (Popen).  Reader threads
+stream output line-by-line from each node in real time.
 """
 
 import os
@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from typing import Dict, List, Tuple
 
@@ -311,6 +312,8 @@ def _build_forward_args(cfg, action="--run"):
         args.append("--ssh")
     for vol in cfg.extra_volumes:
         args += ["--volume", vol]
+    if cfg.nic_type != "mellanox":
+        args += ["--nic-type", cfg.nic_type]
     # --runtime before positional to avoid nargs='?' ambiguity with --ssh
     args += ["--runtime", cfg.runtime_name]
     args.append(cfg.rocm_image)
@@ -318,15 +321,21 @@ def _build_forward_args(cfg, action="--run"):
 
 
 # ---------------------------------------------------------------------------
-# Launch containers on all nodes (parallel via Popen)
+# Launch containers on all nodes (parallel via Popen, streamed output)
 # ---------------------------------------------------------------------------
+def _make_host_label(host, max_len):
+    # type: (str, int) -> str
+    """Right-pad *host* so streaming prefixes align across nodes."""
+    return host.ljust(max_len)
+
+
 def launch_all(cfg):
     # type: (Config) -> None
     """Build + launch a container on every node in the hostfile.
 
     1. Distribute SSH keys, tool code, hostfile, and post-setup to remotes
     2. Spawn deps-build + container-launch on every node concurrently
-    3. Poll for completion, printing progress as each finishes
+    3. Stream output line-by-line from each node as it arrives
     """
     with Timer("Launch all nodes"):
         log("=== Launching containers on all nodes ===")
@@ -346,7 +355,8 @@ def launch_all(cfg):
         remote_hosts = [h for h in hosts if h not in local_names]
         _distribute_files(cfg, remote_hosts)
 
-        # Build compound command: setup-deps (idempotent) then run
+        # Build compound command: setup-deps (idempotent) then run.
+        # python3 -u disables output buffering so lines stream in real time.
         deps_args = _build_forward_args(cfg, action="--setup-deps")
         run_args = _build_forward_args(cfg, action="--run")
 
@@ -354,10 +364,10 @@ def launch_all(cfg):
             # type: (List[str]) -> str
             return " ".join(shlex.quote(a) for a in args)
 
-        deps_cmd = "python3 {} {}".format(
+        deps_cmd = "python3 -u {} {}".format(
             shlex.quote(script), _quote_cmd(deps_args),
         )
-        run_cmd = "python3 {} {}".format(
+        run_cmd = "python3 -u {} {}".format(
             shlex.quote(script), _quote_cmd(run_args),
         )
         compound = "{} && {}".format(deps_cmd, run_cmd)
@@ -377,7 +387,30 @@ def launch_all(cfg):
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 )
 
-        # Poll until all complete, printing progress as each finishes
+        # Reader threads stream output line-by-line from each node
+        label_len = max(len(h) for h in hosts)
+        output_lines = {}   # type: Dict[str, List[str]]
+        print_lock = threading.Lock()
+
+        def _reader(host, proc):
+            # type: (str, subprocess.Popen) -> None
+            label = _make_host_label(host, label_len)
+            lines = []  # type: List[str]
+            for raw in iter(proc.stdout.readline, b""):
+                line = raw.decode("utf-8", errors="replace").rstrip("\n\r")
+                lines.append(line)
+                with print_lock:
+                    log("  [{}] {}".format(label, line))
+            output_lines[host] = lines
+
+        threads = {}  # type: Dict[str, threading.Thread]
+        for host, proc in procs.items():
+            t = threading.Thread(target=_reader, args=(host, proc))
+            t.daemon = True
+            t.start()
+            threads[host] = t
+
+        # Wait for all processes, printing a status line as each finishes
         results = {}  # type: Dict[str, Tuple[int, bytes]]
         done = 0
         while done < len(procs):
@@ -386,13 +419,15 @@ def launch_all(cfg):
                     continue
                 rc = proc.poll()
                 if rc is not None:
-                    output = proc.stdout.read() if proc.stdout else b""
-                    results[host] = (rc, output)
+                    threads[host].join(timeout=5)
+                    text = "\n".join(output_lines.get(host, []))
+                    results[host] = (rc, text.encode("utf-8"))
                     done += 1
                     status = "[OK]  " if rc == 0 else "[FAIL]"
-                    log("  {} {:<40} ({}/{})".format(
-                        status, host, done, len(hosts),
-                    ))
+                    with print_lock:
+                        log("  {} {:<40} ({}/{})".format(
+                            status, host, done, len(hosts),
+                        ))
             if done < len(procs):
                 time.sleep(0.5)
 

@@ -154,6 +154,9 @@ class DockerRuntime(ContainerRuntime):
                 "-f", dockerfile_path,
             ]
 
+            if self.cfg.force_rebuild:
+                cmd.append("--no-cache")
+
             if self.cfg.rocm_image_explicit:
                 cmd += [
                     "--build-arg",
@@ -373,6 +376,44 @@ class DockerRuntime(ContainerRuntime):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
+    def _wait_for_entrypoint(self, timeout=600):
+        # type: (int) -> None
+        """Follow container logs until the entrypoint prints '=== Ready ===' or times out."""
+        cfg = self.cfg
+        log("")
+        log("  Waiting for entrypoint to finish (timeout {}s) ...".format(
+            timeout,
+        ))
+
+        proc = subprocess.Popen(
+            ["docker", "logs", "--follow", cfg.container_name],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        start = time.time()
+        ready = False
+        try:
+            for raw in iter(proc.stdout.readline, b""):
+                line = raw.decode("utf-8", errors="replace").rstrip("\n\r")
+                log("    {}".format(line))
+                if "=== Ready ===" in line:
+                    ready = True
+                    break
+                if time.time() - start > timeout:
+                    log("  WARNING: entrypoint did not become ready "
+                        "within {}s".format(timeout))
+                    break
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+        if ready:
+            elapsed = int(time.time() - start)
+            log("  Entrypoint ready ({}s)".format(elapsed))
+        log("")
+
     def _assemble_run_args(self):
         # type: () -> List[str]
         """Build the full argument list for ``docker run``."""
@@ -402,6 +443,11 @@ class DockerRuntime(ContainerRuntime):
         if cfg.verbose:
             args += ["-e", "VERBOSE=1"]
 
+        args += ["-e", "NIC_TYPE={}".format(cfg.nic_type)]
+
+        if cfg.force_rebuild:
+            args += ["-e", "FORCE_POST_SETUP=1"]
+
         if os.path.exists("/dev/kfd"):
             args += ["--device", "/dev/kfd"]
         if os.path.isdir("/dev/dri"):
@@ -418,7 +464,13 @@ class DockerRuntime(ContainerRuntime):
                     " ".join(os.listdir("/dev/infiniband"))
                 )
             )
-            _bind_mount_rdma_libs(args)
+            if cfg.nic_type == "mellanox":
+                _bind_mount_rdma_libs(args)
+            else:
+                log_verbose(
+                    "Skipping host RDMA lib bind-mount (nic_type={})"
+                    .format(cfg.nic_type)
+                )
         else:
             log_verbose("No InfiniBand devices found at /dev/infiniband")
 
@@ -468,11 +520,4 @@ class DockerRuntime(ContainerRuntime):
             cfg.ssh.key_dir
         ))
 
-        if cfg.verbose:
-            log("")
-            log_verbose("Waiting 3s for entrypoint to finish...")
-            time.sleep(3)
-            log_verbose("Container logs (last 20 lines):")
-            output = _docker_output(["docker", "logs", cfg.container_name])
-            for line in output.splitlines()[-20:]:
-                log_verbose("  {}".format(line))
+        self._wait_for_entrypoint()

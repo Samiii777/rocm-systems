@@ -10,7 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from .config import Config
 from .utils import log, log_verbose, get_local_hostnames, Timer
@@ -122,6 +122,28 @@ def _generate_new_keys(cfg, key_dir, id_rsa):
 # ---------------------------------------------------------------------------
 # SSH connectivity verification
 # ---------------------------------------------------------------------------
+def _detect_container_user(cfg):
+    # type: (Config) -> Optional[str]
+    """Query the running container for its CONTAINER_USER env var."""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", cfg.container_name,
+             "bash", "-c", "echo $CONTAINER_USER"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+        )
+        if result.returncode == 0:
+            user = result.stdout.decode("utf-8", errors="replace").strip()
+            if user:
+                log_verbose(
+                    "Detected container user '{}' from running container"
+                    .format(user)
+                )
+                return user
+    except Exception:
+        pass
+    return None
+
+
 def verify_ssh(cfg):
     # type: (Config) -> None
     """Verify SSH connectivity to all hosts in the hostfile."""
@@ -175,11 +197,13 @@ def verify_ssh(cfg):
             "-o", "LogLevel=ERROR",
         ]
 
-        test_users = ["root", "ubuntu"]
+        container_user = _detect_container_user(cfg) or cfg.container_user
+        test_users = ["root", container_user]
 
         log_verbose(
-            "Verifying {} hosts x {} users".format(
+            "Verifying {} hosts x {} users ({})".format(
                 len(hosts), len(test_users),
+                ", ".join(test_users),
             )
         )
 

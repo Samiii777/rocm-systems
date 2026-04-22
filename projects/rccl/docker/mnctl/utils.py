@@ -24,23 +24,23 @@ def set_verbose(flag):
 # ---------------------------------------------------------------------------
 def log(msg):
     # type: (str) -> None
-    print(msg)
+    print(msg, flush=True)
 
 
 def log_verbose(msg):
     # type: (str) -> None
     if _verbose:
-        print("  [verbose] {}".format(msg))
+        print("  [verbose] {}".format(msg), flush=True)
 
 
 def warn(msg):
     # type: (str) -> None
-    print("WARNING: {}".format(msg), file=sys.stderr)
+    print("WARNING: {}".format(msg), file=sys.stderr, flush=True)
 
 
 def error(msg):
     # type: (str) -> None
-    print("ERROR: {}".format(msg), file=sys.stderr)
+    print("ERROR: {}".format(msg), file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------------------

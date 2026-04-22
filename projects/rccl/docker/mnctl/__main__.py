@@ -6,6 +6,8 @@ Invoke as:
 """
 
 import argparse
+import os
+import re
 import subprocess
 import sys
 
@@ -45,7 +47,7 @@ Environment Variables (override defaults without flags):
   MNCTL_SSH_PORT, MNCTL_SHM_SIZE, MNCTL_SHARED_DIR,
   MNCTL_BUILDS_DIR, MNCTL_SSH_KEY_DIR, MNCTL_SSH_KEY,
   MNCTL_HOSTFILE, MNCTL_HOST_SSH_PORT, MNCTL_POST_SETUP_DIR,
-  MNCTL_DOCKERFILE, MNCTL_VERBOSE
+  MNCTL_DOCKERFILE, MNCTL_NIC_TYPE, MNCTL_VERBOSE
 
 Path expansion:
   All path options support ~ and $VAR / ${VAR} expansion.
@@ -115,6 +117,15 @@ Path expansion:
         ),
     )
     parser.add_argument(
+        "--nic-type", dest="nic_type",
+        help=(
+            "NIC type: mellanox, ainic, or custom "
+            "(default: MNCTL_NIC_TYPE env or mellanox). "
+            "Controls RDMA library bind-mounting and "
+            "NIC-specific post-setup steps."
+        ),
+    )
+    parser.add_argument(
         "--runtime", dest="runtime_name",
         choices=["docker"],
         help="Container runtime (default: docker)",
@@ -170,6 +181,8 @@ def _apply_cli_args(cfg, args):
         cfg.post_setup_dir = args.post_setup_dir
     if args.dockerfile is not None:
         cfg.dockerfile = args.dockerfile
+    if args.nic_type is not None:
+        cfg.nic_type = args.nic_type
     if args.runtime_name is not None:
         cfg.runtime_name = args.runtime_name
     if args.dry_run:
@@ -197,6 +210,21 @@ def _apply_cli_args(cfg, args):
         cfg.ssh.key_dir = args.ssh_key_dir
     if args.host_ssh_port is not None:
         cfg.host_ssh_port = args.host_ssh_port
+
+
+def _resolve_container_user(cfg):
+    # type: (Config) -> str
+    """Parse ``ARG CONTAINER_USER=...`` from the Dockerfile."""
+    dockerfile_path = os.path.join(cfg.script_dir, cfg.dockerfile)
+    try:
+        with open(dockerfile_path) as f:
+            for line in f:
+                m = re.match(r"^ARG\s+CONTAINER_USER=(.+)$", line.strip())
+                if m:
+                    return m.group(1).strip().strip('"').strip("'")
+    except (IOError, OSError):
+        pass
+    return "ubuntu"
 
 
 def _expand_paths(cfg):
@@ -235,6 +263,7 @@ def _dump_config(cfg):
     log_verbose("host_ssh_port={}".format(cfg.host_ssh_port))
     log_verbose("dockerfile={}".format(cfg.dockerfile))
     log_verbose("force_rebuild={}".format(cfg.force_rebuild))
+    log_verbose("nic_type={}".format(cfg.nic_type))
     log_verbose("runtime={}".format(cfg.runtime_name))
     log_verbose("extra_volumes={}".format(cfg.extra_volumes))
     import platform
@@ -252,6 +281,7 @@ def _run():
     cfg = Config()
     _apply_cli_args(cfg, args)
     _expand_paths(cfg)
+    cfg.container_user = _resolve_container_user(cfg)
 
     # Auto-detect GPUs if not set
     if not cfg.gpus:
