@@ -76,21 +76,78 @@ set(TTD_PUBLIC_CXX_HEADERS
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/funcmap.hpp
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/segment.hpp)
 
-# --- COMGR support (optional) ---
+# --- Disassembly backend selection -----------------------------------------
+#
+# Mutually exclusive backends, picked at configure time:
+#
+#   USE_LLVM_DISASM=ON  (default when LLVM is available)
+#       Use LLVM-C's disassembler. Works on Linux/Windows/macOS without ROCm.
+#       LLVM_DIR may be passed to find_package(LLVM) for a custom build —
+#       useful when a new ASIC ships disasm support before the system LLVM
+#       picks it up.
+#
+#   DISABLE_COMGR=OFF / USE_LLVM_DISASM=OFF
+#       Use amd_comgr (legacy ROCm dependency).
+#
+#   DISABLE_COMGR=ON and USE_LLVM_DISASM=OFF
+#       Build without disassembly. va2fo + symbol enumeration still work
+#       (inline ELF parsing) — callers that don't disassemble are fine.
+# ---------------------------------------------------------------------------
 if(NOT DEFINED DISABLE_COMGR)
     option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 endif()
+if(NOT DEFINED USE_LLVM_DISASM)
+    option(USE_LLVM_DISASM "Use LLVM-C disassembler instead of amd_comgr" ON)
+endif()
 
-set(TTD_COMGR_LINK_LIBS)
-if(NOT DISABLE_COMGR)
+set(TTD_DISASM_LINK_LIBS)
+set(TTD_DISASM_INCLUDE_DIRS)
+set(TTD_DISASM_COMPILE_DEFS)
+
+if(USE_LLVM_DISASM)
+    # CONFIG mode is the supported path: LLVM ships LLVMConfig.cmake with
+    # every dev install (apt llvm-XX-dev, brew llvm, official Windows
+    # installer, custom builds). Honor LLVM_DIR for non-system installs.
+    find_package(LLVM CONFIG QUIET)
+    if(LLVM_FOUND)
+        message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} (dir: ${LLVM_DIR})")
+        # Verify AMDGPU is in the targets list — bailing here is far better
+        # than a confused link error or a runtime "unknown target" message.
+        list(FIND LLVM_TARGETS_TO_BUILD "AMDGPU" _amdgpu_idx)
+        if(_amdgpu_idx LESS 0)
+            message(
+                FATAL_ERROR
+                    "LLVM at ${LLVM_DIR} was not built with the AMDGPU target "
+                    "(targets: ${LLVM_TARGETS_TO_BUILD}). Pass LLVM_DIR pointing "
+                    "at an LLVM build that includes AMDGPU, or set " "USE_LLVM_DISASM=OFF.")
+        endif()
+        # llvm_map_components_to_libnames gives us the smallest set; falling
+        # back to the monolithic libLLVM if components aren't separable.
+        if(LLVM_LINK_LLVM_DYLIB)
+            set(TTD_DISASM_LINK_LIBS LLVM)
+        else()
+            llvm_map_components_to_libnames(_llvm_libs MCDisassembler AMDGPUDisassembler AMDGPUDesc AMDGPUInfo Support)
+            set(TTD_DISASM_LINK_LIBS ${_llvm_libs})
+        endif()
+        set(TTD_DISASM_INCLUDE_DIRS ${LLVM_INCLUDE_DIRS})
+        list(APPEND TTD_DISASM_COMPILE_DEFS ROCPROF_TRACE_DECODER_USE_LLVM)
+        # Force comgr off when LLVM is in use; the two backends are mutually
+        # exclusive (header guards enforce this anyway).
+        set(DISABLE_COMGR ON)
+    else()
+        message(STATUS "LLVM not found via find_package(LLVM CONFIG); falling back to amd_comgr if available")
+        set(USE_LLVM_DISASM OFF)
+    endif()
+endif()
+
+if(NOT USE_LLVM_DISASM AND NOT DISABLE_COMGR)
     find_library(
         COMGR_LIB
         NAMES amd_comgr
         HINTS /opt/rocm/lib)
     if(COMGR_LIB)
         message(STATUS "Found amd_comgr: ${COMGR_LIB}")
-        set(TTD_COMGR_LINK_LIBS ${COMGR_LIB})
-        # Locate ROCm include directory for amd_comgr headers
+        set(TTD_DISASM_LINK_LIBS ${COMGR_LIB})
         find_path(
             ROCM_INCLUDE_DIR
             NAMES amd_comgr/amd_comgr.h
@@ -98,10 +155,16 @@ if(NOT DISABLE_COMGR)
         if(NOT ROCM_INCLUDE_DIR)
             set(ROCM_INCLUDE_DIR "/opt/rocm/include")
         endif()
+        set(TTD_DISASM_INCLUDE_DIRS ${ROCM_INCLUDE_DIR})
+        list(APPEND TTD_DISASM_COMPILE_DEFS ROCPROF_TRACE_DECODER_USE_COMGR)
     else()
-        message(WARNING "amd_comgr not found — COMGR features will be stubbed out")
+        message(WARNING "amd_comgr not found and USE_LLVM_DISASM=OFF — disassembly disabled")
         set(DISABLE_COMGR ON)
     endif()
+endif()
+
+if(DISABLE_COMGR AND NOT USE_LLVM_DISASM)
+    list(APPEND TTD_DISASM_COMPILE_DEFS ROCPROF_TRACE_DECODER_COMGR_DISABLED)
 endif()
 
 # --- Object library (compiled once, reused by shared and static) ---
@@ -110,8 +173,11 @@ target_include_directories(
     rocprof-trace-decoder-objects
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
     PUBLIC $<BUILD_INTERFACE:${TTD_PROJECT_SOURCE_DIR}/include>)
-if(NOT DISABLE_COMGR)
-    target_include_directories(rocprof-trace-decoder-objects PRIVATE ${ROCM_INCLUDE_DIR})
+if(TTD_DISASM_INCLUDE_DIRS)
+    target_include_directories(rocprof-trace-decoder-objects PRIVATE ${TTD_DISASM_INCLUDE_DIRS})
+endif()
+if(TTD_DISASM_COMPILE_DEFS)
+    target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ${TTD_DISASM_COMPILE_DEFS})
 endif()
 set_target_properties(rocprof-trace-decoder-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -119,16 +185,30 @@ option(SQTT_LOGGING "Enable SQTT logging" OFF)
 if(SQTT_LOGGING)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE SQTT_LOGGING)
 endif()
-if(DISABLE_COMGR)
-    target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_COMGR_DISABLED)
-endif()
 
 # --- Shared library (installed) ---
+#
+# LLVM is exposed PUBLICly because cxx/disassembly.hpp is header-only and
+# inlines LLVM-C calls into the consuming TU. Consumers of either the shared
+# or static library therefore need LLVM's include dirs, link libs, and the
+# `ROCPROF_TRACE_DECODER_USE_LLVM` define on their own command line.
+# Propagating via PUBLIC means downstream targets (e.g. RCV) just link the
+# namespaced target and inherit the right LLVM transitively — no second
+# `find_package(LLVM)` needed in the consumer.
 add_library(rocprof-trace-decoder SHARED $<TARGET_OBJECTS:rocprof-trace-decoder-objects>)
 target_include_directories(
     rocprof-trace-decoder PUBLIC $<BUILD_INTERFACE:${TTD_PROJECT_SOURCE_DIR}/include>
                                  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rocprof-trace-decoder>)
-target_link_libraries(rocprof-trace-decoder PRIVATE pthread ${TTD_COMGR_LINK_LIBS})
+if(TTD_DISASM_INCLUDE_DIRS)
+    target_include_directories(rocprof-trace-decoder PUBLIC ${TTD_DISASM_INCLUDE_DIRS})
+endif()
+if(TTD_DISASM_COMPILE_DEFS)
+    target_compile_definitions(rocprof-trace-decoder PUBLIC ${TTD_DISASM_COMPILE_DEFS})
+endif()
+target_link_libraries(
+    rocprof-trace-decoder
+    PRIVATE pthread
+    PUBLIC ${TTD_DISASM_LINK_LIBS})
 set_target_properties(
     rocprof-trace-decoder
     PROPERTIES VERSION ${PROJECT_VERSION}
@@ -139,9 +219,22 @@ set_target_properties(
                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 # --- Static library (built but NOT installed) ---
+#
+# Same PUBLIC propagation rationale as the shared lib. The static target is
+# additionally exported into the build-tree CMake package below so consumers
+# (e.g. RCV) can link against it directly without an install step.
 add_library(rocprof-trace-decoder-static STATIC $<TARGET_OBJECTS:rocprof-trace-decoder-objects>)
 target_include_directories(rocprof-trace-decoder-static PUBLIC $<BUILD_INTERFACE:${TTD_PROJECT_SOURCE_DIR}/include>)
-target_link_libraries(rocprof-trace-decoder-static PRIVATE pthread ${TTD_COMGR_LINK_LIBS})
+if(TTD_DISASM_INCLUDE_DIRS)
+    target_include_directories(rocprof-trace-decoder-static PUBLIC ${TTD_DISASM_INCLUDE_DIRS})
+endif()
+if(TTD_DISASM_COMPILE_DEFS)
+    target_compile_definitions(rocprof-trace-decoder-static PUBLIC ${TTD_DISASM_COMPILE_DEFS})
+endif()
+target_link_libraries(
+    rocprof-trace-decoder-static
+    PRIVATE pthread
+    PUBLIC ${TTD_DISASM_LINK_LIBS})
 set_target_properties(rocprof-trace-decoder-static PROPERTIES OUTPUT_NAME rocprof-trace-decoder
                                                               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
@@ -152,11 +245,12 @@ if(DEFINED BUILD_TESTS AND BUILD_TESTS)
         rocprof-trace-decoder-sanitized
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
         PUBLIC $<BUILD_INTERFACE:${TTD_PROJECT_SOURCE_DIR}/include>)
-    target_link_libraries(rocprof-trace-decoder-sanitized PRIVATE pthread ${TTD_COMGR_LINK_LIBS})
-    if(NOT DISABLE_COMGR)
-        target_include_directories(rocprof-trace-decoder-sanitized PRIVATE ${ROCM_INCLUDE_DIR})
-    else()
-        target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ROCPROF_TRACE_DECODER_COMGR_DISABLED)
+    target_link_libraries(rocprof-trace-decoder-sanitized PRIVATE pthread ${TTD_DISASM_LINK_LIBS})
+    if(TTD_DISASM_INCLUDE_DIRS)
+        target_include_directories(rocprof-trace-decoder-sanitized PRIVATE ${TTD_DISASM_INCLUDE_DIRS})
+    endif()
+    if(TTD_DISASM_COMPILE_DEFS)
+        target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ${TTD_DISASM_COMPILE_DEFS})
     endif()
     target_compile_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined -g -O1)
     target_link_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined)
@@ -169,6 +263,22 @@ install(
     EXPORT rocprof-trace-decoder-targets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel)
+
+# --- Build-tree export (no install required) ---
+#
+# Lets downstream projects consume the decoder directly from this build tree:
+#
+#   find_package(rocprof-trace-decoder REQUIRED CONFIG
+#                PATHS /path/to/decoder/build/source)
+#   target_link_libraries(myapp PRIVATE rocprof-trace-decoder::rocprof-trace-decoder-static)
+#
+# Both shared and static targets are exported so the consumer picks. The
+# static target carries the PUBLIC LLVM dependency, so the consumer inherits
+# the right LLVM transitively without re-running find_package(LLVM).
+export(
+    TARGETS rocprof-trace-decoder rocprof-trace-decoder-static
+    NAMESPACE rocprof-trace-decoder::
+    FILE "${CMAKE_CURRENT_BINARY_DIR}/rocprof-trace-decoder-targets.cmake")
 
 # --- Install public headers ---
 install(
@@ -195,6 +305,21 @@ write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/rocprof-trace-decoder-config-version.cmake"
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion)
+
+# Snapshot the disasm-backend variables so the generated config file can
+# re-find the same LLVM (or comgr) the library was built against. Booleans
+# need to be normalized to 0/1 because @VAR@ substitution is textual and
+# CMake will otherwise emit empty strings for unset variables.
+if(USE_LLVM_DISASM)
+    set(USE_LLVM_DISASM 1)
+else()
+    set(USE_LLVM_DISASM 0)
+endif()
+if(DISABLE_COMGR)
+    set(DISABLE_COMGR 1)
+else()
+    set(DISABLE_COMGR 0)
+endif()
 
 configure_package_config_file(
     "${TTD_PROJECT_SOURCE_DIR}/cmake/rocprof-trace-decoder-config.cmake.in"

@@ -45,15 +45,14 @@ public:
 
 private:
     std::ostringstream buf;
-    std::streambuf*    prev;
+    std::streambuf* prev;
 };
 
 bool has_warning(const std::vector<FuncmapDiagnostic>& diags, const std::string& needle)
 {
-    for(const auto& d : diags)
+    for (const auto& d : diags)
     {
-        if(d.severity == FuncmapDiagnostic::Severity::Warning
-           && d.message.find(needle) != std::string::npos)
+        if (d.severity == FuncmapDiagnostic::Severity::Warning && d.message.find(needle) != std::string::npos)
             return true;
     }
     return false;
@@ -61,11 +60,11 @@ bool has_warning(const std::vector<FuncmapDiagnostic>& diags, const std::string&
 
 bool has_error(const std::vector<FuncmapDiagnostic>& diags)
 {
-    for(const auto& d : diags)
-        if(d.severity == FuncmapDiagnostic::Severity::Error) return true;
+    for (const auto& d : diags)
+        if (d.severity == FuncmapDiagnostic::Severity::Error) return true;
     return false;
 }
-}  // namespace
+} // namespace
 
 // ─── decode_marker_value ────────────────────────────────────────────────────
 
@@ -107,15 +106,14 @@ TEST(DecodeMarkerValue, EnterAfterExitTransition)
 
 TEST(ParseFuncmap, EachRowKind)
 {
-    std::string blob =
-        "F:1:my_device_fn@/p/foo.cpp:42\n"
-        "K:my_kernel\n"
-        "U:2:my_scope\n"
-        "P:3:vmem_load@a.cpp:7\n"
-        "W:64\n";
+    std::string blob = "F:1:my_device_fn@/p/foo.cpp:42\n"
+                       "K:my_kernel\n"
+                       "U:2:my_scope\n"
+                       "P:3:vmem_load@a.cpp:7\n"
+                       "W:64\n";
 
     CerrCapture cap;
-    Funcmap     m = parse_funcmap_section(blob);
+    Funcmap m = parse_funcmap_section(blob);
 
     EXPECT_EQ(m.entries.size(), 4u);
     EXPECT_EQ(m.wave_size, 64u);
@@ -147,10 +145,10 @@ TEST(ParseFuncmap, EachRowKind)
 TEST(ParseFuncmap, ToleratesBlankLinesCRLFAndTrailingNUL)
 {
     std::string blob = "F:5:foo\r\n\r\nK:k1\r\n";
-    blob.push_back('\0');  // common: ConstantDataArray::getString(AddNull=true)
+    blob.push_back('\0'); // common: ConstantDataArray::getString(AddNull=true)
 
     CerrCapture cap;
-    Funcmap     m = parse_funcmap_section(blob);
+    Funcmap m = parse_funcmap_section(blob);
     ASSERT_EQ(m.entries.size(), 2u);
     EXPECT_TRUE(m.diagnostics.empty()) << cap.str();
     auto f = m.find(5);
@@ -162,7 +160,7 @@ TEST(ParseFuncmap, SourceLocPreservesColonsAndAtSigns)
 {
     // First `@` splits name from source_loc; subsequent `@` and `:` survive in source_loc.
     std::string blob = "F:1:my_fn@/p/file.cpp:10:5\n";
-    Funcmap     m   = parse_funcmap_section(blob, /*silent=*/true);
+    Funcmap m = parse_funcmap_section(blob, /*silent=*/true);
     ASSERT_EQ(m.entries.size(), 1u);
     auto f = m.find(1);
     ASSERT_TRUE(f);
@@ -172,31 +170,29 @@ TEST(ParseFuncmap, SourceLocPreservesColonsAndAtSigns)
 
 TEST(ParseFuncmap, DuplicateIdsLastWriterWinsAndWarns)
 {
-    std::string blob =
-        "F:7:first\n"
-        "U:7:second\n";
+    std::string blob = "F:7:first\n"
+                       "U:7:second\n";
     CerrCapture cap;
-    Funcmap     m = parse_funcmap_section(blob);
+    Funcmap m = parse_funcmap_section(blob);
 
-    EXPECT_EQ(m.entries.size(), 2u);  // both rows retained in entries
+    EXPECT_EQ(m.entries.size(), 2u); // both rows retained in entries
     auto e = m.find(7);
     ASSERT_TRUE(e);
-    EXPECT_EQ(e->name, "second");  // last-writer-wins in by_id
+    EXPECT_EQ(e->name, "second"); // last-writer-wins in by_id
     EXPECT_TRUE(has_warning(m.diagnostics, "duplicate marker ID 7"));
     EXPECT_NE(cap.str().find("duplicate marker ID 7"), std::string::npos);
 }
 
 TEST(ParseFuncmap, MalformedRowWarnsAndContinues)
 {
-    std::string blob =
-        "F:1:good\n"
-        "garbage line\n"
-        "F:notanumber:bad\n"
-        "X:9:unknown\n"
-        "F:2:also_good\n";
+    std::string blob = "F:1:good\n"
+                       "garbage line\n"
+                       "F:notanumber:bad\n"
+                       "X:9:unknown\n"
+                       "F:2:also_good\n";
 
     CerrCapture cap;
-    Funcmap     m = parse_funcmap_section(blob);
+    Funcmap m = parse_funcmap_section(blob);
 
     EXPECT_TRUE(m.find(1));
     EXPECT_TRUE(m.find(2));
@@ -208,34 +204,32 @@ TEST(ParseFuncmap, MalformedRowWarnsAndContinues)
 
     // Each diagnostic must carry the offending line content + 1-based line no.
     bool found_line_2 = false;
-    for(const auto& d : m.diagnostics)
+    for (const auto& d : m.diagnostics)
     {
-        if(d.line_no == 2 && d.message.find("garbage line") != std::string::npos)
-            found_line_2 = true;
+        if (d.line_no == 2 && d.message.find("garbage line") != std::string::npos) found_line_2 = true;
     }
     EXPECT_TRUE(found_line_2);
 
-    EXPECT_FALSE(cap.str().empty());  // echoed to cerr by default
+    EXPECT_FALSE(cap.str().empty()); // echoed to cerr by default
 }
 
 TEST(ParseFuncmap, SilentSuppressesCerrButPopulatesDiagnostics)
 {
-    std::string blob =
-        "garbage\n"
-        "F:7:first\n"
-        "F:7:second\n";
+    std::string blob = "garbage\n"
+                       "F:7:first\n"
+                       "F:7:second\n";
 
     CerrCapture cap;
-    Funcmap     m = parse_funcmap_section(blob, /*silent=*/true);
+    Funcmap m = parse_funcmap_section(blob, /*silent=*/true);
 
     EXPECT_TRUE(cap.str().empty()) << "expected silent mode to leave cerr untouched";
-    EXPECT_GE(m.diagnostics.size(), 2u);  // garbage + duplicate
+    EXPECT_GE(m.diagnostics.size(), 2u); // garbage + duplicate
 }
 
 TEST(ParseFuncmap, FindReturnsSameInstanceAcrossLookups)
 {
     std::string blob = "F:1:foo\n";
-    Funcmap     m   = parse_funcmap_section(blob, /*silent=*/true);
+    Funcmap m = parse_funcmap_section(blob, /*silent=*/true);
     auto a = m.find(1);
     auto b = m.find(1);
     ASSERT_TRUE(a);
@@ -246,7 +240,7 @@ TEST(ParseFuncmap, FindReturnsSameInstanceAcrossLookups)
 TEST(ParseFuncmap, EmptyBlobYieldsEmptyFuncmap)
 {
     CerrCapture cap;
-    Funcmap     m = parse_funcmap_section("");
+    Funcmap m = parse_funcmap_section("");
     EXPECT_TRUE(m.entries.empty());
     EXPECT_TRUE(m.diagnostics.empty());
     EXPECT_TRUE(cap.str().empty());
@@ -256,7 +250,7 @@ TEST(ParseFuncmap, EmptyBlobYieldsEmptyFuncmap)
 TEST(ParseFuncmap, MalformedWaveSizeWarns)
 {
     std::string blob = "W:notanumber\n";
-    Funcmap     m   = parse_funcmap_section(blob, /*silent=*/true);
+    Funcmap m = parse_funcmap_section(blob, /*silent=*/true);
     EXPECT_EQ(m.wave_size, 0u);
     EXPECT_TRUE(has_warning(m.diagnostics, "malformed W:"));
 }
@@ -273,41 +267,43 @@ struct ElfBuilder
 
     struct SectionDesc
     {
-        std::string          name;
-        uint32_t             type;
+        std::string name;
+        uint32_t type;
         std::vector<uint8_t> data;
     };
 
     // Builds an ELF with `sections` plus an implicit `.shstrtab`. Returns
     // the byte buffer. The first synthetic section is reserved as the SHT_NULL
     // entry (index 0), as per ELF convention.
-    static std::vector<uint8_t> build(const std::vector<SectionDesc>& sections,
-                                      uint8_t                         elf_class = ELFCLASS64,
-                                      uint16_t                        shentsize_override = 0,
-                                      bool                            zero_shstrndx = false,
-                                      bool                            shoff_oob     = false)
+    static std::vector<uint8_t> build(
+        const std::vector<SectionDesc>& sections,
+        uint8_t elf_class = ELFCLASS64,
+        uint16_t shentsize_override = 0,
+        bool zero_shstrndx = false,
+        bool shoff_oob = false
+    )
     {
         // Layout:
         // [Elf64_Ehdr][section data, packed]  [shstrtab data]  [shdr table (NULL + sections + shstrtab)]
         std::vector<uint8_t> shstrtab;
-        shstrtab.push_back(0);  // index 0 must be NUL
+        shstrtab.push_back(0); // index 0 must be NUL
 
         std::vector<uint32_t> name_offsets(sections.size(), 0);
-        for(size_t i = 0; i < sections.size(); ++i)
+        for (size_t i = 0; i < sections.size(); ++i)
         {
             name_offsets[i] = uint32_t(shstrtab.size());
-            for(char c : sections[i].name) shstrtab.push_back(uint8_t(c));
+            for (char c : sections[i].name) shstrtab.push_back(uint8_t(c));
             shstrtab.push_back(0);
         }
         uint32_t shstrtab_name_off = uint32_t(shstrtab.size());
         const std::string shstrtab_name = ".shstrtab";
-        for(char c : shstrtab_name) shstrtab.push_back(uint8_t(c));
+        for (char c : shstrtab_name) shstrtab.push_back(uint8_t(c));
         shstrtab.push_back(0);
 
         // Compute offsets.
-        size_t                cursor = sizeof(Elf64_Ehdr);
+        size_t cursor = sizeof(Elf64_Ehdr);
         std::vector<uint64_t> data_offsets(sections.size(), 0);
-        for(size_t i = 0; i < sections.size(); ++i)
+        for (size_t i = 0; i < sections.size(); ++i)
         {
             data_offsets[i] = cursor;
             cursor += sections[i].data.size();
@@ -318,9 +314,9 @@ struct ElfBuilder
         uint64_t shoff = cursor;
         // 1 SHT_NULL entry at index 0, then `sections.size()` user sections,
         // then 1 .shstrtab section. So total = sections.size() + 2.
-        uint16_t shnum     = uint16_t(sections.size() + 2);
-        uint16_t shstrndx  = uint16_t(sections.size() + 1);
-        if(zero_shstrndx) shstrndx = SHN_UNDEF;
+        uint16_t shnum = uint16_t(sections.size() + 2);
+        uint16_t shstrndx = uint16_t(sections.size() + 1);
+        if (zero_shstrndx) shstrndx = SHN_UNDEF;
 
         size_t shdr_size = sizeof(Elf64_Shdr) * shnum;
 
@@ -328,67 +324,60 @@ struct ElfBuilder
 
         Elf64_Ehdr ehdr{};
         std::memcpy(ehdr.e_ident, ELFMAG, SELFMAG);
-        ehdr.e_ident[EI_CLASS]   = elf_class;
-        ehdr.e_ident[EI_DATA]    = ELFDATA2LSB;
+        ehdr.e_ident[EI_CLASS] = elf_class;
+        ehdr.e_ident[EI_DATA] = ELFDATA2LSB;
         ehdr.e_ident[EI_VERSION] = EV_CURRENT;
-        ehdr.e_type              = ET_REL;
-        ehdr.e_machine           = EM_NONE;
-        ehdr.e_version           = EV_CURRENT;
-        ehdr.e_shoff             = shoff_oob ? out.size() + 0x10000 : shoff;
-        ehdr.e_ehsize            = sizeof(Elf64_Ehdr);
-        ehdr.e_shentsize =
-            shentsize_override != 0 ? shentsize_override : uint16_t(sizeof(Elf64_Shdr));
-        ehdr.e_shnum    = shnum;
+        ehdr.e_type = ET_REL;
+        ehdr.e_machine = EM_NONE;
+        ehdr.e_version = EV_CURRENT;
+        ehdr.e_shoff = shoff_oob ? out.size() + 0x10000 : shoff;
+        ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+        ehdr.e_shentsize = shentsize_override != 0 ? shentsize_override : uint16_t(sizeof(Elf64_Shdr));
+        ehdr.e_shnum = shnum;
         ehdr.e_shstrndx = shstrndx;
         std::memcpy(out.data(), &ehdr, sizeof(ehdr));
 
         // Pack section data.
-        for(size_t i = 0; i < sections.size(); ++i)
-            std::memcpy(out.data() + data_offsets[i], sections[i].data.data(),
-                        sections[i].data.size());
+        for (size_t i = 0; i < sections.size(); ++i)
+            std::memcpy(out.data() + data_offsets[i], sections[i].data.data(), sections[i].data.size());
         std::memcpy(out.data() + shstrtab_off, shstrtab.data(), shstrtab.size());
 
         // SHT_NULL entry at index 0 (already zero).
         // User sections at indices [1..sections.size()].
-        for(size_t i = 0; i < sections.size(); ++i)
+        for (size_t i = 0; i < sections.size(); ++i)
         {
             Elf64_Shdr s{};
-            s.sh_name   = name_offsets[i];
-            s.sh_type   = sections[i].type;
-            s.sh_flags  = 0;
+            s.sh_name = name_offsets[i];
+            s.sh_type = sections[i].type;
+            s.sh_flags = 0;
             s.sh_offset = data_offsets[i];
-            s.sh_size   = sections[i].data.size();
+            s.sh_size = sections[i].data.size();
             std::memcpy(out.data() + shoff + (i + 1) * sizeof(Elf64_Shdr), &s, sizeof(s));
         }
         // .shstrtab at index sections.size() + 1.
         Elf64_Shdr s_str{};
-        s_str.sh_name   = shstrtab_name_off;
-        s_str.sh_type   = SHT_STRTAB;
+        s_str.sh_name = shstrtab_name_off;
+        s_str.sh_type = SHT_STRTAB;
         s_str.sh_offset = shstrtab_off;
-        s_str.sh_size   = shstrtab.size();
-        std::memcpy(out.data() + shoff + (sections.size() + 1) * sizeof(Elf64_Shdr), &s_str,
-                    sizeof(s_str));
+        s_str.sh_size = shstrtab.size();
+        std::memcpy(out.data() + shoff + (sections.size() + 1) * sizeof(Elf64_Shdr), &s_str, sizeof(s_str));
 
         return out;
     }
 };
 
-std::vector<uint8_t> bytes_of(const std::string& s)
-{
-    return std::vector<uint8_t>(s.begin(), s.end());
-}
-}  // namespace
+std::vector<uint8_t> bytes_of(const std::string& s) { return std::vector<uint8_t>(s.begin(), s.end()); }
+} // namespace
 
 TEST(ExtractElfSection, FindsSection)
 {
     std::string body = "F:1:foo\n";
-    auto        elf  = ElfBuilder::build({
+    auto elf = ElfBuilder::build({
         {".sqtt_funcmap", SHT_PROGBITS, bytes_of(body)},
     });
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     ASSERT_TRUE(sec);
     EXPECT_EQ(*sec, body);
     EXPECT_TRUE(diags.empty());
@@ -396,22 +385,24 @@ TEST(ExtractElfSection, FindsSection)
 
 TEST(ExtractElfSection, AbsentSectionReturnsNulloptNoDiag)
 {
-    auto elf = ElfBuilder::build({{".text", SHT_PROGBITS, {0x90, 0x90}}});
+    auto elf = ElfBuilder::build({
+        {".text", SHT_PROGBITS, {0x90, 0x90}}
+    });
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     EXPECT_FALSE(sec);
-    EXPECT_TRUE(diags.empty());  // common case — non-instrumented binary
+    EXPECT_TRUE(diags.empty()); // common case — non-instrumented binary
 }
 
 TEST(ExtractElfSection, EmptySectionReturnsNulloptWithWarning)
 {
-    auto elf = ElfBuilder::build({{".sqtt_funcmap", SHT_PROGBITS, {}}});
+    auto elf = ElfBuilder::build({
+        {".sqtt_funcmap", SHT_PROGBITS, {}}
+    });
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     EXPECT_FALSE(sec);
     ASSERT_EQ(diags.size(), 1u);
     EXPECT_EQ(diags[0].severity, FuncmapDiagnostic::Severity::Warning);
@@ -420,14 +411,13 @@ TEST(ExtractElfSection, EmptySectionReturnsNulloptWithWarning)
 TEST(ExtractElfSection, MultipleProgbitsSelectByName)
 {
     auto elf = ElfBuilder::build({
-        {".text", SHT_PROGBITS, {0x90, 0x90, 0x90}},
-        {".rodata", SHT_PROGBITS, bytes_of("hello")},
+        {".text",         SHT_PROGBITS, {0x90, 0x90, 0x90}   },
+        {".rodata",       SHT_PROGBITS, bytes_of("hello")    },
         {".sqtt_funcmap", SHT_PROGBITS, bytes_of("F:1:hit\n")},
     });
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     ASSERT_TRUE(sec);
     EXPECT_EQ(*sec, "F:1:hit\n");
     EXPECT_TRUE(diags.empty());
@@ -435,50 +425,66 @@ TEST(ExtractElfSection, MultipleProgbitsSelectByName)
 
 TEST(ExtractElfSection, RejectsElf32)
 {
-    auto elf = ElfBuilder::build({{".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}}, ELFCLASS32);
+    auto elf = ElfBuilder::build(
+        {
+            {".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}
+    },
+        ELFCLASS32
+    );
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     EXPECT_FALSE(sec);
     EXPECT_TRUE(has_error(diags));
 }
 
 TEST(ExtractElfSection, RejectsBadShentsize)
 {
-    auto elf = ElfBuilder::build({{".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}}, ELFCLASS64,
-                                 /*shentsize_override=*/13);
+    auto elf = ElfBuilder::build(
+        {
+            {".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}
+    },
+        ELFCLASS64,
+        /*shentsize_override=*/13
+    );
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     EXPECT_FALSE(sec);
     EXPECT_TRUE(has_error(diags));
 }
 
 TEST(ExtractElfSection, RejectsShoffOutOfRange)
 {
-    auto elf = ElfBuilder::build({{".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}}, ELFCLASS64,
-                                 /*shentsize_override=*/0,
-                                 /*zero_shstrndx=*/false,
-                                 /*shoff_oob=*/true);
+    auto elf = ElfBuilder::build(
+        {
+            {".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}
+    },
+        ELFCLASS64,
+        /*shentsize_override=*/0,
+        /*zero_shstrndx=*/false,
+        /*shoff_oob=*/true
+    );
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     EXPECT_FALSE(sec);
     EXPECT_TRUE(has_error(diags));
 }
 
 TEST(ExtractElfSection, RejectsNoShstrndx)
 {
-    auto elf = ElfBuilder::build({{".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}}, ELFCLASS64,
-                                 /*shentsize_override=*/0,
-                                 /*zero_shstrndx=*/true);
+    auto elf = ElfBuilder::build(
+        {
+            {".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}
+    },
+        ELFCLASS64,
+        /*shentsize_override=*/0,
+        /*zero_shstrndx=*/true
+    );
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     EXPECT_FALSE(sec);
     EXPECT_TRUE(has_error(diags));
 }
@@ -503,7 +509,9 @@ TEST(ExtractElfSection, RejectsNullBuffer)
 // Adversarial sh_size near 2^64 must not wrap and pass the bound check.
 TEST(ExtractElfSection, RejectsAdversarialShSizeWrap)
 {
-    auto elf = ElfBuilder::build({{".sqtt_funcmap", SHT_PROGBITS, bytes_of("F:1:x\n")}});
+    auto elf = ElfBuilder::build({
+        {".sqtt_funcmap", SHT_PROGBITS, bytes_of("F:1:x\n")}
+    });
 
     // Find the .sqtt_funcmap shdr (index 1: NULL=0, our section=1) and clobber sh_size.
     Elf64_Ehdr ehdr;
@@ -512,12 +520,11 @@ TEST(ExtractElfSection, RejectsAdversarialShSizeWrap)
     size_t shdr_off = ehdr.e_shoff + 1 * sizeof(Elf64_Shdr);
     std::memcpy(&s, elf.data() + shdr_off, sizeof(s));
     // sh_offset is small and valid; sh_size huge so sh_offset + sh_size wraps.
-    s.sh_size = ~uint64_t(0) - s.sh_offset + 1;  // wrap target = 0
+    s.sh_size = ~uint64_t(0) - s.sh_offset + 1; // wrap target = 0
     std::memcpy(elf.data() + shdr_off, &s, sizeof(s));
 
     std::vector<FuncmapDiagnostic> diags;
-    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(),
-                                   ".sqtt_funcmap", diags);
+    auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
     EXPECT_FALSE(sec);
     EXPECT_TRUE(has_error(diags));
 }

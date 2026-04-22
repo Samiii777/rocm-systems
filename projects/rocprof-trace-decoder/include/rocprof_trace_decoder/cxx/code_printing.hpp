@@ -26,8 +26,6 @@
 #include "funcmap.hpp"
 #include "segment.hpp"
 
-#include <hsa/amd_hsa_elf.h>
-
 #include <algorithm>
 #include <cstring>
 #include <fstream>

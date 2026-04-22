@@ -188,6 +188,12 @@ std::shared_ptr<HandleData> get_handle_data(rocprof_trace_decoder_handle_t handl
     return nullptr;
 }
 
+// The "comgr_isa_callback" name is historical — this callback is the bridge
+// from the wave-trace parser to whichever disassembly backend is compiled in
+// (amd_comgr, LLVM-C, or none). It just calls into DecoderInstance::table
+// which delegates to DisassemblyInstance::ReadInstruction; the backend choice
+// is opaque from here. The COMGR_DISABLED gate now means "no disasm backend
+// at all" — when LLVM is selected, this is enabled.
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
 rocprofiler_thread_trace_decoder_status_t comgr_isa_callback(
     char* isa_instruction,
