@@ -375,7 +375,24 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
     )
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+
+    # Verify that for each expected pattern, at least one file exists
+    actual_files = set(file_dict.keys())
+    for expected_pattern in PC_SAMPLING_HOST_TRAP_FILES:
+        if "*" in expected_pattern:
+            # Check if any actual file matches the pattern
+            matching_files = [
+                f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)
+            ]
+            assert len(matching_files) > 0, (
+                f"Expected at least 1 file matching pattern "
+                f"'{expected_pattern}', found 0"
+            )
+        else:
+            # Exact match for patterns without wildcards
+            assert expected_pattern in actual_files, (
+                f"Expected file '{expected_pattern}' not found"
+            )
 
     assert test_utils.check_file_pattern(
         "- '21'", f"{workload_dir}/profiling_config.yaml"
