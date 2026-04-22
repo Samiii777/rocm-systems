@@ -13,7 +13,7 @@ import sys
 from typing import Dict, Tuple
 
 from .config import Config
-from .utils import log, log_verbose, Timer
+from .utils import log, log_verbose, get_local_hostnames, Timer
 
 
 def write_ssh_config(cfg):
@@ -187,12 +187,77 @@ def verify_ssh(cfg):
             _print_ssh_fix_hints(cfg)
             sys.exit(1)
 
+        # Self-SSH: verify each container can SSH to itself (needed by MPI)
+        log("")
+        log("=== Verifying container self-SSH (localhost) ===")
+        self_failed = _verify_self_ssh(cfg, hosts)
+        if self_failed:
+            _print_ssh_fix_hints(cfg)
+            sys.exit(1)
+
     log("")
     log(
         "All hosts reachable (as {}). Ready for MPI workloads.".format(
             " ".join(test_users)
         )
     )
+
+
+def _verify_self_ssh(cfg, hosts):
+    # type: (Config, list) -> bool
+    """Verify each container can SSH to localhost (parallel via Popen).
+
+    Returns True if any host failed.
+    """
+    local_names = get_local_hostnames()
+    self_ssh_cmd = [
+        "ssh",
+        "-p", str(cfg.ssh.port),
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "BatchMode=yes",
+        "-o", "LogLevel=ERROR",
+        "localhost", "hostname",
+    ]
+    exec_cmd = ["docker", "exec", cfg.container_name] + self_ssh_cmd
+
+    host_ssh_base = [
+        "ssh",
+        "-p", str(cfg.host_ssh_port),
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "ConnectTimeout=10",
+        "-o", "BatchMode=yes",
+        "-o", "LogLevel=ERROR",
+    ]
+
+    procs = {}  # type: dict
+    for host in hosts:
+        if host in local_names:
+            procs[host] = subprocess.Popen(
+                exec_cmd,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+        else:
+            procs[host] = subprocess.Popen(
+                host_ssh_base + [host] + exec_cmd,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
+    failed = False
+    for host in hosts:
+        proc = procs[host]
+        proc.wait()
+        if proc.returncode == 0:
+            log("  [OK]   {} -> localhost".format(host))
+        else:
+            log("  [FAIL] {} -> localhost (container cannot SSH to itself)".format(host))
+            failed = True
+            if cfg.verbose:
+                stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+                for line in stderr.splitlines()[-10:]:
+                    log_verbose("  {}".format(line))
+    return failed
 
 
 def _log_ssh_debug(ssh_opts, user, host):
