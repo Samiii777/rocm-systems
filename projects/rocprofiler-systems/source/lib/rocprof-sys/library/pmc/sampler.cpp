@@ -299,8 +299,7 @@ postfork_parent_reinit()
 }
 
 void
-register_gpu_perf_counter_source(uint64_t context_handle,
-                                 const std::vector<std::shared_ptr<agent>>& agent_list)
+register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list)
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
@@ -309,8 +308,8 @@ register_gpu_perf_counter_source(uint64_t context_handle,
         const auto enabled_metrics =
             collectors::settings_policy::get_gpu_perf_counter_enabled_metrics();
 
-        g_gpu_perf_counter_provider = std::make_shared<gpu_perf_counter_provider_t>(
-            context_handle, agent_list, enabled_metrics);
+        g_gpu_perf_counter_provider =
+            std::make_shared<gpu_perf_counter_provider_t>(agent_list, enabled_metrics);
         g_gpu_perf_counter_provider->start();
         g_gpu_perf_counter_collector =
             std::make_unique<gpu_perf_counter_collector_t>(g_gpu_perf_counter_provider);

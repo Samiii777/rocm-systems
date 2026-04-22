@@ -43,7 +43,6 @@ void
 postfork_parent_reinit();
 
 void
-register_gpu_perf_counter_source(uint64_t context_handle,
-                                 const std::vector<std::shared_ptr<agent>>& agent_list);
+register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list);
 
 }  // namespace rocprofsys::pmc
