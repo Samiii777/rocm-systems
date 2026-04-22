@@ -2362,6 +2362,8 @@ static inline uint32_t tilePatternToUint32(const void* pattern, size_t patternSi
   }
 
   if (patternSize == sizeof(uint32_t)) {
+    assert((reinterpret_cast<uintptr_t>(pattern) % alignof(uint32_t)) == 0 &&
+           "tilePatternToUint32 expects uint32_t-aligned pattern");
     return *static_cast<const uint32_t*>(pattern);
   }
   assert(false && "tilePatternToUint32 only supports 1- and 2-byte patterns");
@@ -2385,9 +2387,6 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
     return result;
   }
 
-  // Take this path if we are unaligned, to 16 bytes, and pattern size of 8, 16, or 32 bits.
-  // The buffer must be greater than 512 bytes to justify taking this path,
-  // otherwise aligned 1 char pattern path will likely be better
   const uintptr_t fill_buf_addr = memory.virtualAddress() + origin[0];
   constexpr uint32_t kFillType = FillBufferUnAligned;
 
@@ -2397,10 +2396,6 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
       isGraphPktCapturing
           ? (unsigned char*)gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
           : (unsigned char*)gpu().allocKernArg(kCBSize, kCBAlignment);
-  // Pattern values
-  size_t address_alignment = fill_buf_addr % sizeof(int32_t);
-  constexpr size_t pattern_size_in_bytes = sizeof(int);
-  const size_t pattern_offset = patternSize - address_alignment;
 
   union body {
     int32_t pattern;
