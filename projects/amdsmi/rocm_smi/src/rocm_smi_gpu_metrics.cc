@@ -83,7 +83,8 @@ AMDGpuMetricsHeader_v1_t disjoin_metrics_version(uint16_t version) {
 
 uint64_t actual_timestamp_in_secs() {
   using namespace std::chrono;
-  return duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+  return static_cast<uint64_t>(
+      duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
 }
 
 auto timestamp_to_time_point(uint64_t timestamp_in_secs) {
