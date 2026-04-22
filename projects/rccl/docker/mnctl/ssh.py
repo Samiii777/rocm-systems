@@ -58,6 +58,30 @@ def install_ssh_keys(cfg):
         log_verbose("  --ssh                 # generate a new shared pair")
 
 
+def _add_to_host_authorized_keys(pub_key_path):
+    # type: (str) -> None
+    """Append the public key to the host's ~/.ssh/authorized_keys (idempotent)."""
+    host_ssh_dir = os.path.join(os.path.expanduser("~"), ".ssh")
+    if not os.path.isdir(host_ssh_dir):
+        os.makedirs(host_ssh_dir, mode=0o700, exist_ok=True)
+
+    auth_keys = os.path.join(host_ssh_dir, "authorized_keys")
+    with open(pub_key_path, "r") as f:
+        pub_data = f.read().strip()
+
+    if os.path.isfile(auth_keys):
+        with open(auth_keys, "r") as f:
+            existing = f.read()
+        if pub_data in existing:
+            log_verbose("Public key already in host authorized_keys")
+            return
+
+    with open(auth_keys, "a") as f:
+        f.write(pub_data + "\n")
+    os.chmod(auth_keys, 0o600)
+    log_verbose("Added public key to {}".format(auth_keys))
+
+
 def _install_from_existing(cfg, key_dir):
     # type: (Config, str) -> None
     priv = cfg.ssh.priv_key
@@ -69,6 +93,7 @@ def _install_from_existing(cfg, key_dir):
     shutil.copy2(pub, os.path.join(key_dir, "authorized_keys"))
 
     write_ssh_config(cfg)
+    _add_to_host_authorized_keys(os.path.join(key_dir, "id_rsa.pub"))
     log("  SSH keys configured at {}".format(key_dir))
 
 
@@ -87,6 +112,7 @@ def _generate_new_keys(cfg, key_dir, id_rsa):
     shutil.copy2(pub_file, os.path.join(key_dir, "authorized_keys"))
 
     write_ssh_config(cfg)
+    _add_to_host_authorized_keys(pub_file)
     log("  Keys generated at {}".format(key_dir))
 
 

@@ -77,8 +77,12 @@ def setup_host(cfg):
 # ---------------------------------------------------------------------------
 def _ssh_base_cmd(cfg, host):
     # type: (Config, str) -> List[str]
-    """Build the SSH prefix for reaching *host*."""
-    return [
+    """Build the SSH prefix for reaching *host*.
+
+    Uses the generated/shared key from cfg.ssh.key_dir when available,
+    so that host-level SSH works after --ssh / --ssh-keygen setup.
+    """
+    cmd = [
         "ssh",
         "-p", str(cfg.host_ssh_port),
         "-o", "StrictHostKeyChecking=no",
@@ -86,8 +90,76 @@ def _ssh_base_cmd(cfg, host):
         "-o", "ConnectTimeout=10",
         "-o", "BatchMode=yes",
         "-o", "LogLevel=ERROR",
-        host,
     ]
+    host_key = os.path.join(cfg.ssh.key_dir, "id_rsa")
+    if os.path.isfile(host_key):
+        cmd += ["-i", host_key]
+    cmd.append(host)
+    return cmd
+
+
+# ---------------------------------------------------------------------------
+# SSH key bootstrap for remote hosts
+# ---------------------------------------------------------------------------
+def _push_pubkey_to_remotes(cfg, remote_hosts, pub_key_path):
+    # type: (Config, List[str], str) -> None
+    """Append our public key to ~/.ssh/authorized_keys on each remote host.
+
+    Uses ssh-copy-id when available; falls back to a manual mkdir+append.
+    This is the bootstrap step that enables subsequent rsync/SSH operations.
+    """
+    with open(pub_key_path, "r") as f:
+        pub_data = f.read().strip()
+
+    use_copy_id = shutil.which("ssh-copy-id") is not None
+
+    procs = {}  # type: Dict[str, subprocess.Popen]
+    for host in remote_hosts:
+        if use_copy_id:
+            cmd = [
+                "ssh-copy-id",
+                "-i", pub_key_path,
+                "-p", str(cfg.host_ssh_port),
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "LogLevel=ERROR",
+                host,
+            ]
+        else:
+            remote_cmd = (
+                "mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
+                "grep -qxF '{key}' ~/.ssh/authorized_keys 2>/dev/null "
+                "|| echo '{key}' >> ~/.ssh/authorized_keys && "
+                "chmod 600 ~/.ssh/authorized_keys"
+            ).format(key=pub_data)
+            cmd = _ssh_base_cmd(cfg, host) + [remote_cmd]
+        procs[host] = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    ok_count = 0
+    for host in remote_hosts:
+        proc = procs[host]
+        proc.wait()
+        if proc.returncode == 0:
+            ok_count += 1
+            log_verbose("  Public key installed on {}".format(host))
+        else:
+            err = ""
+            if proc.stderr:
+                err = proc.stderr.read().decode(
+                    "utf-8", errors="replace"
+                ).strip()
+            log_verbose(
+                "  Key push to {} returned {}: {}".format(
+                    host, proc.returncode, err[:200]
+                )
+            )
+
+    if ok_count:
+        log("  SSH key bootstrapped on {}/{} remote node(s)".format(
+            ok_count, len(remote_hosts),
+        ))
 
 
 # ---------------------------------------------------------------------------
@@ -113,9 +185,19 @@ def _distribute_files(cfg, remote_hosts):
         len(remote_hosts),
     ))
 
+    host_key = os.path.join(cfg.ssh.key_dir, "id_rsa")
+    pub_key = host_key + ".pub"
+
+    # Bootstrap: install our public key into each remote host's
+    # ~/.ssh/authorized_keys so subsequent SSH/rsync operations work.
+    if os.path.isfile(pub_key):
+        _push_pubkey_to_remotes(cfg, remote_hosts, pub_key)
+
     rsh = "ssh -p {} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o LogLevel=ERROR".format(
         cfg.host_ssh_port,
     )
+    if os.path.isfile(host_key):
+        rsh += " -i {}".format(host_key)
 
     # (local_path, is_dir, label)
     items = [
