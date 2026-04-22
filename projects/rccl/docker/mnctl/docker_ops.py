@@ -7,9 +7,10 @@ management.
 
 import glob
 import os
+import re
 import subprocess
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .runtime import ContainerRuntime
 from .utils import error, log, log_verbose, Timer
@@ -54,6 +55,49 @@ def _docker_output(cmd):
     return result.stdout.decode("utf-8", errors="replace").strip()
 
 
+def _resolve_dockerfile_base(dockerfile_path):
+    # type: (str) -> Optional[str]
+    """Parse a Dockerfile to resolve the actual base image from ARG defaults.
+
+    Handles patterns like:
+        ARG ROCM_IMAGE=some/image:tag
+        FROM ${ROCM_IMAGE}
+    and:
+        ARG ROCM_IMAGE_NAME=some/image
+        ARG ROCM_IMAGE_TAG=1.0
+        FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
+    """
+    try:
+        with open(dockerfile_path, "r") as f:
+            lines = f.readlines()
+    except (IOError, OSError):
+        return None
+
+    args = {}  # type: Dict[str, str]
+    from_line = None
+
+    for line in lines:
+        stripped = line.strip()
+        m = re.match(r"^ARG\s+(\w+)=(.+)$", stripped)
+        if m:
+            args[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+        if stripped.upper().startswith("FROM "):
+            from_line = stripped[5:].strip().strip('"').strip("'")
+            break
+
+    if from_line is None:
+        return None
+
+    def _sub(match):
+        # type: (re.Match) -> str
+        name = match.group(1)
+        return args.get(name, match.group(0))
+
+    resolved = re.sub(r"\$\{(\w+)\}", _sub, from_line)
+    resolved = re.sub(r"\$(\w+)", _sub, resolved)
+    return resolved if "$" not in resolved else None
+
+
 # ---------------------------------------------------------------------------
 # DockerRuntime
 # ---------------------------------------------------------------------------
@@ -77,6 +121,11 @@ class DockerRuntime(ContainerRuntime):
 
     def build_image(self):
         # type: () -> None
+        dockerfile_path = os.path.join(
+            self.cfg.script_dir, self.cfg.dockerfile
+        )
+        self._sync_base_from_dockerfile(dockerfile_path)
+
         if not self.cfg.force_rebuild and self.image_exists():
             log(
                 "=== Image {} already exists "
@@ -96,17 +145,20 @@ class DockerRuntime(ContainerRuntime):
             log("  Tag        : {}".format(self.cfg.image_tag))
             log("")
 
-            self._ensure_base_image()
+            self._ensure_base_image(self.cfg.rocm_image)
 
             cmd = [
                 "docker", "build",
-                "--build-arg", "ROCM_IMAGE={}".format(self.cfg.rocm_image),
                 "--build-arg", "SSH_PORT={}".format(self.cfg.ssh.port),
                 "-t", self.cfg.image_tag,
-                "-f", os.path.join(
-                    self.cfg.script_dir, self.cfg.dockerfile
-                ),
+                "-f", dockerfile_path,
             ]
+
+            if self.cfg.rocm_image_explicit:
+                cmd += [
+                    "--build-arg",
+                    "ROCM_IMAGE={}".format(self.cfg.rocm_image),
+                ]
 
             if self.cfg.verbose:
                 cmd.append("--progress=plain")
@@ -253,10 +305,27 @@ class DockerRuntime(ContainerRuntime):
 
     # --- Private helpers ---
 
-    def _ensure_base_image(self):
-        # type: () -> None
+    def _sync_base_from_dockerfile(self, dockerfile_path):
+        # type: (str) -> None
+        """Update cfg.rocm_image from the Dockerfile when not user-specified.
+
+        Parses ARG/FROM defaults so that ``image_tag`` and
+        ``_ensure_base_image`` use the correct base for any Dockerfile.
+        """
+        if self.cfg.rocm_image_explicit:
+            return
+        parsed = _resolve_dockerfile_base(dockerfile_path)
+        if parsed:
+            log_verbose(
+                "Resolved base image from {}: {}".format(
+                    self.cfg.dockerfile, parsed
+                )
+            )
+            self.cfg.rocm_image = parsed
+
+    def _ensure_base_image(self, base):
+        # type: (str) -> None
         """Verify the base image is available locally; pull if needed."""
-        base = self.cfg.rocm_image
         if self._image_exists_local(base):
             log_verbose("Base image '{}' found locally".format(base))
             return

@@ -153,6 +153,7 @@ def _apply_cli_args(cfg, args):
         cfg.action = args.action
     if args.rocm_image is not None:
         cfg.rocm_image = args.rocm_image
+        cfg.rocm_image_explicit = True
 
     # --ssh: "auto" means keygen, any other value is a key path
     if args.ssh is not None:

@@ -67,13 +67,13 @@ class Config(object):
         home = os.path.expanduser("~")
 
         self.action = Action.BUILD
-        self.rocm_image = os.environ.get(
-            "MNCTL_ROCM_IMAGE", "rocm/dev-ubuntu-24.04:7.1.1-complete"
-        )
+        _env_image = os.environ.get("MNCTL_ROCM_IMAGE", "")
+        self.rocm_image = _env_image or "rocm/dev-ubuntu-24.04:7.1.1-complete"
         self.container_name = os.environ.get("MNCTL_CONTAINER_NAME", "rccl-mn")
         self.shm_size = os.environ.get("MNCTL_SHM_SIZE", "64g")
         self.gpus = os.environ.get("MNCTL_GPUS", "")
         self.gpus_explicit = False
+        self.rocm_image_explicit = bool(_env_image)
 
         self.shared_dir = os.environ.get(
             "MNCTL_SHARED_DIR", os.path.join(home, ".docker-shared")
