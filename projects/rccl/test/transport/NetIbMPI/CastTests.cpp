@@ -1,11 +1,12 @@
 /*************************************************************************
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include <initializer_list>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -451,7 +452,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSz  = 32;
-    constexpr size_t kBufSz  = (NCCL_IB_CAST_INSPECT_MAX_QPS + 1) * kMsgSz;
+    constexpr size_t kBufSz  = (NCCL_IB_MAX_QPS + 1)  * kMsgSz;
     constexpr int    kBaseTag = 1300;
 
     std::vector<char> sendBuf(kBufSz, 0);
@@ -634,27 +635,32 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // Register a buffer large enough for the worst-case threshold.
-    constexpr size_t kBufSz = 262144;
-    std::vector<char> sendBuf(kBufSz, 0x5A);
-    std::vector<char> recvBuf(kBufSz, 0x00);
+    void* comm = (rank == 0) ? recvComm : sendComm;
 
-    void* comm    = (rank == 0) ? recvComm : sendComm;
-    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
-                                : static_cast<void*>(sendBuf.data());
-    void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
-
-    // Warmup: learn real nqps to compute actual split threshold.
-    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, 64, 1599, mhandle);
+    // Phase 0: small warmup buffer to learn actualNqps before allocating the real buffer.
+    constexpr size_t kWarmupSz = 128;
+    std::vector<char> warmupBuf(kWarmupSz, 0);
+    void* warmupBase = warmupBuf.data();
+    void* warmupHandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, warmupBase, kWarmupSz, NCCL_PTR_HOST, &warmupHandle), ncclSuccess);
+    const int actualNqps = GetActualNqps(sendComm, recvComm, warmupBase, 64, 1599, warmupHandle);
     ASSERT_GT(actualNqps, 0);
+    ASSERT_EQ(DeregisterMemory(comm, warmupHandle), ncclSuccess);
 
     // threshold = splitDataMin * nqps (from net_ib_cast.cc: dataPerQp = size*nreqs/nqps)
     const size_t kSplitDataMin = GetSplitDataMin();
     const size_t kThreshold    = kSplitDataMin * static_cast<size_t>(actualNqps);
     const size_t kSplitSz      = kThreshold;       // dataPerQp == splitDataMin → split
     const size_t kWrrSz        = kThreshold - 1;   // dataPerQp <  splitDataMin → WRR
-    ASSERT_LE(kSplitSz, kBufSz) << "buffer too small for threshold=" << kThreshold;
+
+    // Allocate and register the real buffer sized for the actual threshold.
+    const size_t kBufSz = kThreshold;
+    std::vector<char> sendBuf(kBufSz, 0x5A);
+    std::vector<char> recvBuf(kBufSz, 0x00);
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
     if (rank == 1) {
         const std::vector<int> tokens = EqualTokens(actualNqps);
@@ -838,25 +844,29 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // Start with a warmup-sized buffer; we'll reuse it for all sends after learning nqps.
-    constexpr size_t kBufSz = 262144;
-    std::vector<char> sendBuf(kBufSz, 0xBC);
-    std::vector<char> recvBuf(kBufSz, 0x00);
+    void* comm = (rank == 0) ? recvComm : sendComm;
 
-    void* comm    = (rank == 0) ? recvComm : sendComm;
-    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
-                                : static_cast<void*>(sendBuf.data());
-    void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
-
-    // Warmup: fires updateSchedParmsTry epoch AND learns real nqps.
-    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, 64, 1799, mhandle);
+    // Phase 0: small warmup buffer to learn actualNqps before allocating the real buffer.
+    constexpr size_t kWarmupSz = 128;
+    std::vector<char> warmupBuf(kWarmupSz, 0);
+    void* warmupBase = warmupBuf.data();
+    void* warmupHandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, warmupBase, kWarmupSz, NCCL_PTR_HOST, &warmupHandle), ncclSuccess);
+    const int actualNqps = GetActualNqps(sendComm, recvComm, warmupBase, 64, 1799, warmupHandle);
     ASSERT_GT(actualNqps, 0);
+    ASSERT_EQ(DeregisterMemory(comm, warmupHandle), ncclSuccess);
 
     // Message at the split threshold: dataPerQp = splitDataMin → split when splitData=true.
     const size_t kSplitDataMin = GetSplitDataMin();
     const size_t kMsgSz        = kSplitDataMin * static_cast<size_t>(actualNqps);
-    ASSERT_LE(kMsgSz, kBufSz) << "buffer too small for threshold=" << kMsgSz;
+
+    // Allocate and register the real buffer sized for the actual threshold.
+    std::vector<char> sendBuf(kMsgSz, 0xBC);
+    std::vector<char> recvBuf(kMsgSz, 0x00);
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
     if (rank == 1) {
         const std::vector<int> tokens = EqualTokens(actualNqps);
@@ -946,14 +956,15 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // 512 bytes: small enough to stay below split threshold → WRR when enable=true, bypass when enable=false
-    constexpr size_t kMsgSz = 512;
-    char sendBuf[kMsgSz], recvBuf[kMsgSz];
-    memset(sendBuf, 0xCD, kMsgSz);
-    memset(recvBuf, 0,    kMsgSz);
+    // Must be strictly below splitDataMin so dataPerQp < splitDataMin for any nqps,
+    // ensuring messages take the WRR path (not the split path).
+    const size_t kMsgSz = std::max<size_t>(64, GetSplitDataMin() - 1);
+    std::vector<char> sendBuf(kMsgSz, 0xCD);
+    std::vector<char> recvBuf(kMsgSz, 0);
 
     void* comm    = (rank == 0) ? recvComm : sendComm;
-    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, buf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
@@ -1072,7 +1083,15 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     }
 
     // Sizes below threshold → WRR path (1 token consumed each).
-    const std::vector<size_t> kWrrSizes   = {512, 4096, kSplitDataMin, kThreshold - 1};
+    // All entries must be strictly below kThreshold; filter out any that aren't
+    // (e.g. 512 and 4096 may exceed kThreshold when splitDataMin is small).
+    std::vector<size_t> kWrrSizes;
+    for (size_t sz : std::initializer_list<size_t>{512, 4096, kSplitDataMin, kThreshold - 1}) {
+        if (sz > 0 && sz < kThreshold && sz <= kBufSz)
+            kWrrSizes.push_back(sz);
+    }
+    // Deduplicate (kSplitDataMin or 512 might equal kThreshold-1).
+    kWrrSizes.erase(std::unique(kWrrSizes.begin(), kWrrSizes.end()), kWrrSizes.end());
     // Sizes at/above threshold → split path (0 tokens consumed).
     const std::vector<size_t> kSplitSizes = {kThreshold, kThreshold * 2};
     int baseTag = 2000;

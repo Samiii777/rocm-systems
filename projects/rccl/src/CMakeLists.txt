@@ -104,6 +104,7 @@ set(SRC_FILES
   src/include/nccl_device.h
   src/include/net_device.h
   src/include/net.h
+  src/include/net_ib_cast_inspect.h
   src/include/nvmlwrap.h
   src/include/nvtx.h
   src/include/nvtx_payload_schemas.h
