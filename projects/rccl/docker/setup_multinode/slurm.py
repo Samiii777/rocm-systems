@@ -120,10 +120,6 @@ def _auto_configure_ssh(cfg):
         if os.path.isfile(key_path):
             cfg.ssh.key = key_path
             log("  SSH key        : {} (auto-detected)".format(key_path))
-            ak = os.path.join(home, ".ssh", "authorized_keys")
-            if os.path.isfile(ak):
-                cfg.ssh.authorized_keys = ak
-                log("  authorized_keys: {} (auto-detected)".format(ak))
             return
 
     cfg.ssh.keygen = True

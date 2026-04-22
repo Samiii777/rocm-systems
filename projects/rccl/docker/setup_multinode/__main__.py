@@ -17,6 +17,7 @@ from .runtime import get_runtime
 from .ssh import verify_ssh
 from .deps import setup_shared_deps
 from .orchestrate import setup_host, launch_all, stop_all
+from .preflight import run_preflight
 
 
 def build_parser():
@@ -36,15 +37,13 @@ Examples:
   python3 -m setup_multinode --verify                                 # check SSH
   python3 -m setup_multinode --launch-all --ssh-keygen                # build+launch, auto SSH
   python3 -m setup_multinode --launch-all --ssh-key ~/.ssh/id_rsa     # use your keys
-  python3 -m setup_multinode --launch-all --ssh-key ~/.ssh/id_rsa \\
-                             --ssh-authorized-keys ~/.ssh/authorized_keys  # mesh SSH
   python3 -m setup_multinode --setup-deps                             # build shared UCX/MPI
   python3 -m setup_multinode --stop-all                               # stop everywhere
-  python3 -m setup_multinode --launch-all --parallel 64               # max parallelism
+  python3 -m setup_multinode --launch-all --dry-run                    # pre-flight checks
 
 Environment Variables (alternative to flags):
   ROCM_IMAGE, CONTAINER_NAME, SHARED_DIR, BUILDS_DIR, SSH_KEY_DIR,
-  SSH_KEY, SSH_AUTHORIZED_KEYS, HOSTFILE, SSH_PORT, GPUS,
+  SSH_KEY, HOSTFILE, SSH_PORT, GPUS,
   POST_SETUP_DIR, HOST_SSH_PORT, DOCKERFILE, VERBOSE
 
 Path expansion:
@@ -142,10 +141,6 @@ Path expansion:
         help="Use existing SSH key pair for inter-container SSH",
     )
     parser.add_argument(
-        "--ssh-authorized-keys",
-        help="Custom authorized_keys file (for mesh SSH setups)",
-    )
-    parser.add_argument(
         "--ssh-keygen", action="store_true",
         help="Auto-generate a shared SSH key pair",
     )
@@ -159,19 +154,16 @@ Path expansion:
         ),
     )
     parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Validate configuration and check prerequisites without executing",
+    )
+    parser.add_argument(
         "--rebuild", action="store_true",
         help="Force image rebuild and replace existing containers",
     )
     parser.add_argument(
         "--host-ssh-port", type=int,
         help="SSH port for host-to-host access (default: 22)",
-    )
-    parser.add_argument(
-        "--parallel", type=int,
-        help=(
-            "Max nodes to operate on concurrently for "
-            "--launch-all, --stop-all, --verify (default: 16)"
-        ),
     )
     parser.add_argument(
         "--runtime", dest="runtime_name",
@@ -216,18 +208,16 @@ def _apply_cli_args(cfg, args):
         cfg.post_setup_dir = args.post_setup_dir
     if args.ssh_key is not None:
         cfg.ssh.key = args.ssh_key
-    if args.ssh_authorized_keys is not None:
-        cfg.ssh.authorized_keys = args.ssh_authorized_keys
     if args.ssh_keygen:
         cfg.ssh.keygen = True
     if args.dockerfile is not None:
         cfg.dockerfile = args.dockerfile
+    if args.dry_run:
+        cfg.dry_run = True
     if args.rebuild:
         cfg.force_rebuild = True
     if args.host_ssh_port is not None:
         cfg.host_ssh_port = args.host_ssh_port
-    if args.parallel is not None:
-        cfg.parallel = args.parallel
     if args.runtime_name is not None:
         cfg.runtime_name = args.runtime_name
     if args.verbose:
@@ -245,8 +235,6 @@ def _expand_paths(cfg):
         cfg.post_setup_dir = expand_path(cfg.post_setup_dir)
     if cfg.ssh.key:
         cfg.ssh.key = expand_path(cfg.ssh.key)
-    if cfg.ssh.authorized_keys:
-        cfg.ssh.authorized_keys = expand_path(cfg.ssh.authorized_keys)
     cfg.extra_volumes = [expand_path(v) for v in cfg.extra_volumes]
 
 
@@ -267,15 +255,11 @@ def _dump_config(cfg):
     log_verbose("hostfile={}".format(cfg.hostfile))
     log_verbose("post_setup_dir={}".format(cfg.post_setup_dir))
     log_verbose("ssh.key={}".format(cfg.ssh.key or ""))
-    log_verbose("ssh.authorized_keys={}".format(
-        cfg.ssh.authorized_keys or ""
-    ))
     log_verbose("ssh.keygen={}".format(cfg.ssh.keygen))
     log_verbose("action={}".format(cfg.action.value))
     log_verbose("host_ssh_port={}".format(cfg.host_ssh_port))
     log_verbose("dockerfile={}".format(cfg.dockerfile))
     log_verbose("force_rebuild={}".format(cfg.force_rebuild))
-    log_verbose("parallel={}".format(cfg.parallel))
     log_verbose("runtime={}".format(cfg.runtime_name))
     log_verbose("extra_volumes={}".format(cfg.extra_volumes))
     import platform
@@ -313,6 +297,11 @@ def _run():
     # Verbose config dump
     if cfg.verbose:
         _dump_config(cfg)
+
+    # Dry-run: pre-flight checks only, then exit
+    if cfg.dry_run:
+        run_preflight(cfg)
+        return
 
     # --- Dispatch ---
     if cfg.action == Action.VERIFY:

@@ -3,14 +3,13 @@
 Handles:
   - Installing user-supplied or auto-generated SSH keys into the shared key dir
   - Writing the SSH client config for container-to-container access
-  - Verifying passwordless SSH to every host in the hostfile (parallel)
+  - Verifying passwordless SSH to every host in the hostfile (parallel via Popen)
 """
 
 import os
 import shutil
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Tuple
 
 from .config import Config
@@ -55,21 +54,8 @@ def install_ssh_keys(cfg):
     else:
         log("  No SSH keys configured (use --ssh-key or --ssh-keygen for multi-node)")
         log_verbose("Hint: for multi-node SSH, use one of:")
-        log_verbose(
-            "  --ssh-key ~/.ssh/id_rsa"
-            "                                              "
-            "# shared key pair"
-        )
-        log_verbose(
-            "  --ssh-key ~/.ssh/id_rsa "
-            "--ssh-authorized-keys ~/.ssh/authorized_keys "
-            "# mesh SSH (per-node keys)"
-        )
-        log_verbose(
-            "  --ssh-keygen"
-            "                                                         "
-            "# generate a new pair"
-        )
+        log_verbose("  --ssh-key ~/.ssh/id_rsa   # use your existing key pair")
+        log_verbose("  --ssh-keygen              # generate a new shared pair")
 
 
 def _install_from_existing(cfg, key_dir):
@@ -80,20 +66,7 @@ def _install_from_existing(cfg, key_dir):
 
     shutil.copy2(priv, os.path.join(key_dir, "id_rsa"))
     shutil.copy2(pub, os.path.join(key_dir, "id_rsa.pub"))
-
-    ak_dst = os.path.join(key_dir, "authorized_keys")
-    if cfg.ssh.authorized_keys:
-        shutil.copy2(cfg.ssh.authorized_keys, ak_dst)
-        with open(ak_dst, "a") as dst:
-            with open(pub) as src:
-                dst.write(src.read())
-        log_verbose(
-            "authorized_keys: merged from {} + {}".format(
-                cfg.ssh.authorized_keys, pub
-            )
-        )
-    else:
-        shutil.copy2(pub, ak_dst)
+    shutil.copy2(pub, os.path.join(key_dir, "authorized_keys"))
 
     write_ssh_config(cfg)
     log("  SSH keys configured at {}".format(key_dir))
@@ -111,20 +84,7 @@ def _generate_new_keys(cfg, key_dir, id_rsa):
     )
 
     pub_file = id_rsa + ".pub"
-    ak_dst = os.path.join(key_dir, "authorized_keys")
-
-    if cfg.ssh.authorized_keys:
-        shutil.copy2(cfg.ssh.authorized_keys, ak_dst)
-        with open(ak_dst, "a") as dst:
-            with open(pub_file) as src:
-                dst.write(src.read())
-        log_verbose(
-            "authorized_keys: merged from {} + generated key".format(
-                cfg.ssh.authorized_keys
-            )
-        )
-    else:
-        shutil.copy2(pub_file, ak_dst)
+    shutil.copy2(pub_file, os.path.join(key_dir, "authorized_keys"))
 
     write_ssh_config(cfg)
     log("  Keys generated at {}".format(key_dir))
@@ -172,10 +132,6 @@ def verify_ssh(cfg):
                 "    python3 -m setup_multinode --launch-all "
                 "--ssh-keygen              # generate a new pair"
             )
-            log(
-                "  For mesh SSH (per-node keys), also pass "
-                "--ssh-authorized-keys"
-            )
             sys.exit(1)
 
         log_verbose("Using SSH key: {}".format(ssh_key))
@@ -191,38 +147,28 @@ def verify_ssh(cfg):
         ]
 
         test_users = ["root", "ubuntu"]
-        max_workers = min(cfg.parallel, len(hosts))
 
         log_verbose(
-            "Verifying {} hosts x {} users ({} parallel)".format(
-                len(hosts), len(test_users), max_workers,
+            "Verifying {} hosts x {} users".format(
+                len(hosts), len(test_users),
             )
         )
 
-        def _check_one(host, user):
-            # type: (str, str) -> Tuple[str, str, bool]
-            result = subprocess.run(
-                ["ssh"] + ssh_opts
-                + ["{}@{}".format(user, host), "hostname"],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-            return host, user, result.returncode == 0
+        # Spawn all checks at once
+        procs = {}  # type: Dict[Tuple[str, str], subprocess.Popen]
+        for host in hosts:
+            for user in test_users:
+                procs[(host, user)] = subprocess.Popen(
+                    ["ssh"] + ssh_opts
+                    + ["{}@{}".format(user, host), "hostname"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
 
-        # Run checks in parallel
+        # Collect results (all procs already running concurrently)
         results = {}  # type: Dict[Tuple[str, str], bool]
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {}
-            for host in hosts:
-                for user in test_users:
-                    f = pool.submit(_check_one, host, user)
-                    futures[f] = (host, user)
-            for future in as_completed(futures):
-                host, user = futures[future]
-                try:
-                    _, _, ok = future.result()
-                    results[(host, user)] = ok
-                except Exception:
-                    results[(host, user)] = False
+        for key, proc in procs.items():
+            proc.wait()
+            results[key] = proc.returncode == 0
 
         # Print in hostfile order
         failed = False
@@ -284,4 +230,3 @@ def _print_ssh_fix_hints(cfg):
         "    python3 -m setup_multinode --launch-all "
         "--ssh-keygen              # generate a new pair"
     )
-    log("  For mesh SSH (per-node keys), also pass --ssh-authorized-keys")

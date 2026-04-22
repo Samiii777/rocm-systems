@@ -27,14 +27,12 @@ class SSHConfig(object):
     def __init__(
         self,
         key=None,               # type: Optional[str]
-        authorized_keys=None,   # type: Optional[str]
         keygen=False,           # type: bool
         key_dir=None,           # type: Optional[str]
         port=2224,              # type: int
     ):
         # type: (...) -> None
         self.key = key
-        self.authorized_keys = authorized_keys
         self.keygen = keygen
         self.key_dir = key_dir or os.path.join(
             os.path.expanduser("~"), ".docker-ssh-keys"
@@ -91,13 +89,11 @@ class Config(object):
         self.host_ssh_port = int(os.environ.get("HOST_SSH_PORT", "22"))
         self.verbose = bool(os.environ.get("VERBOSE", ""))
         self.force_rebuild = False
+        self.dry_run = False
         self.extra_volumes = []  # type: List[str]
         self.dockerfile = os.environ.get(
             "DOCKERFILE", "Dockerfile.Multinode.Ubuntu"
         )
-
-        # Parallelism for multi-node operations (launch_all, stop_all, verify)
-        self.parallel = 16
 
         # Container runtime selection ("docker" or future "pyxis")
         self.runtime_name = "docker"
@@ -105,7 +101,6 @@ class Config(object):
 
         self.ssh = SSHConfig(
             key=os.environ.get("SSH_KEY", "") or None,
-            authorized_keys=os.environ.get("SSH_AUTHORIZED_KEYS", "") or None,
             key_dir=(
                 os.environ.get("SSH_KEY_DIR", "")
                 or os.path.join(home, ".docker-ssh-keys")

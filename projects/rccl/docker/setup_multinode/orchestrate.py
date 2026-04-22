@@ -1,16 +1,15 @@
 """Multi-node orchestration: host setup, launch-all, stop-all.
 
 The host-setup phase creates shared directories and installs SSH keys.
-launch_all / stop_all fan out to every node in the hostfile, using
-``concurrent.futures.ThreadPoolExecutor`` for parallel execution so
-that the framework scales to 64+ nodes without linear slowdown.
+launch_all / stop_all fan out to every node in the hostfile by spawning
+all SSH commands as concurrent subprocesses (Popen), then polling for
+completion.  No threads are used — the OS handles parallelism.
 """
 
 import os
 import subprocess
 import sys
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 from typing import Dict, List, Tuple
 
 from .config import Config
@@ -72,12 +71,12 @@ def setup_host(cfg):
 
 
 # ---------------------------------------------------------------------------
-# SSH wrapper for host-to-host access (port 22 by default)
+# Helpers
 # ---------------------------------------------------------------------------
-def _host_ssh(cfg, host, cmd, capture=False):
-    # type: (Config, str, ..., bool) -> subprocess.CompletedProcess
-    """Run a command on a remote host via SSH."""
-    ssh_base = [
+def _ssh_base_cmd(cfg, host):
+    # type: (Config, str) -> List[str]
+    """Build the SSH prefix for reaching *host*."""
+    return [
         "ssh",
         "-p", str(cfg.host_ssh_port),
         "-o", "StrictHostKeyChecking=no",
@@ -87,16 +86,6 @@ def _host_ssh(cfg, host, cmd, capture=False):
         "-o", "LogLevel=ERROR",
         host,
     ]
-    if isinstance(cmd, str):
-        ssh_cmd = ssh_base + [cmd]
-    else:
-        ssh_cmd = ssh_base + list(cmd)
-
-    kwargs = {}
-    if capture:
-        kwargs["stdout"] = subprocess.PIPE
-        kwargs["stderr"] = subprocess.PIPE
-    return subprocess.run(ssh_cmd, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -128,8 +117,6 @@ def _build_forward_args(cfg):
         args += ["--post-setup", cfg.post_setup_dir]
     if cfg.ssh.key:
         args += ["--ssh-key", cfg.ssh.key]
-    if cfg.ssh.authorized_keys:
-        args += ["--ssh-authorized-keys", cfg.ssh.authorized_keys]
     if cfg.ssh.keygen:
         args.append("--ssh-keygen")
     for vol in cfg.extra_volumes:
@@ -139,15 +126,14 @@ def _build_forward_args(cfg):
 
 
 # ---------------------------------------------------------------------------
-# Launch containers on all nodes (parallel)
+# Launch containers on all nodes (parallel via Popen)
 # ---------------------------------------------------------------------------
 def launch_all(cfg):
     # type: (Config) -> None
     """Build + launch a container on every node in the hostfile.
 
-    Uses ThreadPoolExecutor to run up to ``cfg.parallel`` nodes
-    concurrently.  Per-node output is captured and replayed only on
-    failure so that parallel execution does not produce interleaved logs.
+    All SSH commands are spawned concurrently as subprocesses, then
+    polled for completion so progress is printed in real time.
     """
     with Timer("Launch all nodes"):
         log("=== Launching containers on all nodes ===")
@@ -156,73 +142,48 @@ def launch_all(cfg):
         hosts = parse_hostfile(cfg.hostfile)
         local_names = get_local_hostnames()
         script = os.path.join(cfg.script_dir, "run_multinode.py")
-        max_workers = min(cfg.parallel, len(hosts))
 
         log("  Hostfile  : {} ({} nodes)".format(cfg.hostfile, len(hosts)))
         log("  Image     : {}".format(cfg.image_tag))
         log("  Container : {}".format(cfg.container_name))
-        log("  Parallel  : {}".format(max_workers))
         log_verbose("Script    : {}".format(script))
         log("")
 
         forward_args = _build_forward_args(cfg)
+        node_cmd = ["python3", script] + forward_args
 
-        # Thread-safe progress counter
-        _lock = threading.Lock()
-        _done = [0]
-
-        def _launch_one(host):
-            # type: (str) -> Tuple[str, int, bytes]
-            cmd = ["python3", script] + forward_args
+        # Spawn all nodes at once
+        procs = {}  # type: Dict[str, subprocess.Popen]
+        for host in hosts:
             if host in local_names:
-                result = subprocess.run(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                )
-            else:
-                ssh_base = [
-                    "ssh",
-                    "-p", str(cfg.host_ssh_port),
-                    "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    "-o", "ConnectTimeout=10",
-                    "-o", "BatchMode=yes",
-                    "-o", "LogLevel=ERROR",
-                    host,
-                ] + cmd
-                result = subprocess.run(
-                    ssh_base,
+                procs[host] = subprocess.Popen(
+                    node_cmd,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 )
-            with _lock:
-                _done[0] += 1
-                status = "[OK]  " if result.returncode == 0 else "[FAIL]"
-                log("  {} {:<40} ({}/{})".format(
-                    status, host, _done[0], len(hosts),
-                ))
-            return host, result.returncode, result.stdout or b""
+            else:
+                procs[host] = subprocess.Popen(
+                    _ssh_base_cmd(cfg, host) + node_cmd,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                )
 
-        # Execute in parallel
+        # Poll until all complete, printing progress as each finishes
         results = {}  # type: Dict[str, Tuple[int, bytes]]
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(_launch_one, h): h for h in hosts
-            }
-            for future in as_completed(futures):
-                host = futures[future]
-                try:
-                    host_name, rc, output = future.result()
-                    results[host_name] = (rc, output)
-                except Exception as exc:
-                    with _lock:
-                        _done[0] += 1
-                        log("  [FAIL] {:<40} ({}/{}) {}".format(
-                            host, _done[0], len(hosts),
-                            type(exc).__name__,
-                        ))
-                    results[host] = (
-                        1,
-                        str(exc).encode("utf-8", errors="replace"),
-                    )
+        done = 0
+        while done < len(procs):
+            for host, proc in procs.items():
+                if host in results:
+                    continue
+                rc = proc.poll()
+                if rc is not None:
+                    output = proc.stdout.read() if proc.stdout else b""
+                    results[host] = (rc, output)
+                    done += 1
+                    status = "[OK]  " if rc == 0 else "[FAIL]"
+                    log("  {} {:<40} ({}/{})".format(
+                        status, host, done, len(hosts),
+                    ))
+            if done < len(procs):
+                time.sleep(0.5)
 
         failed = [h for h in hosts if results.get(h, (1, b""))[0] != 0]
         succeeded = [h for h in hosts if results.get(h, (1, b""))[0] == 0]
@@ -269,7 +230,7 @@ def _report_launch_failures(cfg, hosts, results, failed, succeeded):
 
 
 # ---------------------------------------------------------------------------
-# Stop containers on all nodes (parallel)
+# Stop containers on all nodes (parallel via Popen)
 # ---------------------------------------------------------------------------
 def stop_all(cfg):
     # type: (Config) -> None
@@ -280,53 +241,34 @@ def stop_all(cfg):
     hosts = parse_hostfile(cfg.hostfile)
     local_names = get_local_hostnames()
     stop_cmd = cfg.runtime.get_stop_cmd()
-    max_workers = min(cfg.parallel, len(hosts))
 
-    def _stop_one(host):
-        # type: (str) -> Tuple[str, int, str]
+    # Spawn all stop commands at once
+    procs = {}  # type: Dict[str, subprocess.Popen]
+    for host in hosts:
         if host in local_names:
-            result = subprocess.run(
+            procs[host] = subprocess.Popen(
                 stop_cmd, shell=True,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
         else:
-            result = _host_ssh(cfg, host, stop_cmd, capture=True)
-        output = ""
-        if result.stdout:
-            output = result.stdout.decode(
-                "utf-8", errors="replace"
-            ).strip()
-        if result.returncode != 0:
-            stderr = ""
-            if result.stderr:
-                stderr = result.stderr.decode(
-                    "utf-8", errors="replace"
-                ).strip()
-            output = "[UNREACHABLE] {}".format(
-                stderr[:200] if stderr else "exit {}".format(
-                    result.returncode
-                )
+            procs[host] = subprocess.Popen(
+                _ssh_base_cmd(cfg, host) + [stop_cmd],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
-        return host, result.returncode, output
 
-    results = {}  # type: Dict[str, Tuple[int, str]]
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_stop_one, h): h for h in hosts}
-        for future in as_completed(futures):
-            host = futures[future]
-            try:
-                host_name, rc, output = future.result()
-                results[host_name] = (rc, output)
-            except Exception as exc:
-                results[host] = (1, "[ERROR] {}".format(exc))
-
-    # Print in hostfile order
+    # Collect results (all procs are already running concurrently)
     unreachable = []
     for host in hosts:
-        rc, output = results.get(host, (1, "[ERROR] no result"))
-        log("  {:<20} {}".format(host, output))
-        if rc != 0:
+        proc = procs[host]
+        stdout, stderr = proc.communicate()
+        output = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
+        if proc.returncode != 0:
+            err = stderr.decode("utf-8", errors="replace").strip() if stderr else ""
+            output = "[UNREACHABLE] {}".format(
+                err[:200] if err else "exit {}".format(proc.returncode)
+            )
             unreachable.append(host)
+        log("  {:<20} {}".format(host, output))
 
     if unreachable:
         log("")

@@ -63,20 +63,6 @@ def validate(cfg):
         if pub and not os.path.isfile(pub):
             errors.append("SSH public key not found: {}".format(pub))
 
-    # --- authorized_keys requires a private key ---
-    if cfg.ssh.authorized_keys:
-        if not os.path.isfile(cfg.ssh.authorized_keys):
-            errors.append(
-                "SSH authorized_keys file not found: {}".format(
-                    cfg.ssh.authorized_keys
-                )
-            )
-        if not cfg.ssh.key and not cfg.ssh.keygen:
-            errors.append(
-                "--ssh-authorized-keys requires --ssh-key or --ssh-keygen "
-                "(need a private key for outbound SSH)"
-            )
-
     # --- Dockerfile existence for build actions ---
     if action in (Action.BUILD, Action.RUN, Action.LAUNCH_ALL, Action.SETUP_DEPS):
         import os as _os
