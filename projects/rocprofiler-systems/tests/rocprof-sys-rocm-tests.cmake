@@ -174,6 +174,44 @@ endforeach()
 
 # -------------------------------------------------------------------------------------- #
 #
+# GPU Performance Counter tests (device counting service via ROCPROFSYS_GPU_PERF_COUNTERS)
+#
+# -------------------------------------------------------------------------------------- #
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME transpose-gpu-perf-counters
+    TARGET transpose
+    LABELS "rocprofiler"
+    MPI ${TRANSPOSE_USE_MPI}
+    GPU ON
+    NUM_PROCS ${NUM_PROCS}
+    ENVIRONMENT
+        "${_transpose_environment};ROCPROFSYS_GPU_PERF_COUNTERS=${ROCPROFSYS_ROCM_EVENTS_TEST}"
+    SAMPLING_PASS_REGEX "${_ROCP_PASS_REGEX}"
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME transpose-gpu-perf-counters-sampling
+    PERFETTO_FILE "perfetto-trace.proto"
+    ARGS --counter-names ${ROCPROFSYS_COUNTER_NAMES_ARG} -p
+    LABELS "rocprofiler"
+)
+
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-gpu-perf-counters-sampling)
+    set_property(TEST transpose-gpu-perf-counters-sampling APPEND PROPERTY LABELS rocpd)
+
+    rocprofiler_systems_add_validation_test(
+        NAME transpose-gpu-perf-counters-sampling
+        ROCPD_FILE "rocpd.db"
+        ARGS --validation-rules
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/gpu-perf-counter-rules.json"
+        LABELS "rocpd"
+    )
+endif()
+
+# -------------------------------------------------------------------------------------- #
+#
 # ROCpd tests
 #
 # -------------------------------------------------------------------------------------- #
