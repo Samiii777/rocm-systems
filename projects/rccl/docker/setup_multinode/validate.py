@@ -77,6 +77,29 @@ def validate(cfg):
                 "(need a private key for outbound SSH)"
             )
 
+    # --- Dockerfile existence for build actions ---
+    if action in (Action.BUILD, Action.RUN, Action.LAUNCH_ALL, Action.SETUP_DEPS):
+        import os as _os
+        if _os.path.isabs(cfg.dockerfile):
+            df_path = cfg.dockerfile
+        else:
+            df_path = _os.path.join(cfg.script_dir, cfg.dockerfile)
+        if not _os.path.isfile(df_path):
+            available = [
+                f for f in _os.listdir(cfg.script_dir)
+                if f.startswith("Dockerfile.")
+            ]
+            errors.append(
+                "Dockerfile not found: {df}\n"
+                "  Available in {sd}/:\n"
+                "    {avail}".format(
+                    df=df_path,
+                    sd=cfg.script_dir,
+                    avail="\n    ".join(sorted(available)) if available
+                    else "(none)",
+                )
+            )
+
     # --- Post-setup directory ---
     if cfg.post_setup_dir:
         if not os.path.isdir(cfg.post_setup_dir):

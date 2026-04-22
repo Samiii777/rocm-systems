@@ -91,9 +91,12 @@ class DockerRuntime(ContainerRuntime):
 
         with Timer("Image build"):
             log("=== Building image ===")
-            log("  Base  : {}".format(self.cfg.rocm_image))
-            log("  Tag   : {}".format(self.cfg.image_tag))
+            log("  Base       : {}".format(self.cfg.rocm_image))
+            log("  Dockerfile : {}".format(self.cfg.dockerfile))
+            log("  Tag        : {}".format(self.cfg.image_tag))
             log("")
+
+            self._ensure_base_image()
 
             cmd = [
                 "docker", "build",
@@ -249,6 +252,50 @@ class DockerRuntime(ContainerRuntime):
         return result.returncode
 
     # --- Private helpers ---
+
+    def _ensure_base_image(self):
+        # type: () -> None
+        """Verify the base image is available locally; pull if needed."""
+        base = self.cfg.rocm_image
+        if self._image_exists_local(base):
+            log_verbose("Base image '{}' found locally".format(base))
+            return
+
+        log("  Base image '{}' not found locally, pulling...".format(base))
+        pull = subprocess.run(
+            ["docker", "pull", base],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        if pull.returncode == 0:
+            log("  Pulled '{}'".format(base))
+            return
+
+        log("")
+        error("Base image '{}' is not available".format(base))
+        log("  It does not exist locally and could not be pulled.")
+        log("")
+        log("  The Dockerfile ({}) requires this image in its".format(
+            self.cfg.dockerfile
+        ))
+        log("  FROM directive. You must make it available first:")
+        log("")
+        log("  Options:")
+        log("    1. Pull from a registry:")
+        log("       docker pull {}".format(base))
+        log("    2. Build it locally (if you have a Dockerfile for it):")
+        log("       docker build -t {} -f <Dockerfile> .".format(base))
+        log("    3. Use a different base image:")
+        log("       python3 -m setup_multinode <other-image>")
+        raise SystemExit(1)
+
+    @staticmethod
+    def _image_exists_local(tag):
+        # type: (str) -> bool
+        result = subprocess.run(
+            ["docker", "image", "inspect", tag],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        return result.returncode == 0
 
     def _remove_container(self):
         # type: () -> None
