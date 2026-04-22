@@ -95,7 +95,6 @@ namespace rocprofiler
 {
 namespace tool
 {
-
 using marker_message_map_t         = std::unordered_map<uint64_t, std::string>;
 using marker_message_ordered_map_t = std::map<uint64_t, std::string>;
 using string_entry_map_t           = std::unordered_map<size_t, std::unique_ptr<std::string>>;

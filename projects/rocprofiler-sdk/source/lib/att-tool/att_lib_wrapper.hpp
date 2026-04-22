@@ -73,9 +73,9 @@ class ATTFileMgr
     using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
 public:
-    ATTFileMgr(Fspath                                _dir,
-               std::vector<std::string>              _counters,
-               rocprof_trace_decoder_handle_t        _decoder);
+    ATTFileMgr(Fspath                         _dir,
+               std::vector<std::string>       _counters,
+               rocprof_trace_decoder_handle_t _decoder);
     ~ATTFileMgr();
 
     void addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, uint64_t memsize);

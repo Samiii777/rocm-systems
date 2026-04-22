@@ -58,11 +58,11 @@
     }
 
 #define DECODER_CALL(result)                                                                       \
-    if(auto ec = (result); ec != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)                   \
+    if(auto ec = (result); ec != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)                  \
     {                                                                                              \
         std::cerr << "Decoder error at " << __FILE__ << ":" << __LINE__ << std::endl;              \
         std::cerr << "Decoder error code " << ec << ": "                                           \
-                  << rocprof_trace_decoder_get_status_string(ec) << std::endl;                      \
+                  << rocprof_trace_decoder_get_status_string(ec) << std::endl;                     \
     }
 
 #define CHECK_NOTNULL(x)                                                                           \
@@ -185,11 +185,11 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
         CHECK_NOTNULL(memorybase);
 
         DECODER_CALL(rocprof_trace_decoder_codeobj_load(decoder,
-                                                                   data->code_object_id,
-                                                                   data->load_delta,
-                                                                   data->load_size,
-                                                                   memorybase,
-                                                                   data->memory_size));
+                                                        data->code_object_id,
+                                                        data->load_delta,
+                                                        data->load_size,
+                                                        memorybase,
+                                                        data->memory_size));
 
         Results::table->addDecoder(
             memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
@@ -208,14 +208,12 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          events,
                     uint64_t                                       num_events,
-                    void* /* userdata */)
-        -> rocprofiler_thread_trace_decoder_status_t {
+                    void* /* userdata */) -> rocprofiler_thread_trace_decoder_status_t {
         if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY)
         {
             for(size_t i = 0; i < num_events; i++)
             {
-                auto& event =
-                    static_cast<rocprofiler_thread_trace_decoder_occupancy_t*>(events)[i];
+                auto& event = static_cast<rocprofiler_thread_trace_decoder_occupancy_t*>(events)[i];
 
                 if(event.start)
                 {
@@ -234,8 +232,7 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
         {
             for(size_t w = 0; w < num_events; w++)
             {
-                auto* wave =
-                    static_cast<rocprofiler_thread_trace_decoder_wave_t*>(events);
+                auto* wave = static_cast<rocprofiler_thread_trace_decoder_wave_t*>(events);
                 for(size_t i = 0; i < wave->instructions_size; i++)
                 {
                     auto& inst    = wave->instructions_array[i];

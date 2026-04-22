@@ -29,7 +29,7 @@
 #include "stream_stack.hpp"
 
 #ifndef ROCPROFILER_DISABLE_TRACE_DECODER
-#include "lib/att-tool/att_lib_wrapper.hpp"
+#    include "lib/att-tool/att_lib_wrapper.hpp"
 #endif
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"

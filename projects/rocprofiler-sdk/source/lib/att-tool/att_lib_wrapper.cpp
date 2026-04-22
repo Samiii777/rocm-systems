@@ -40,9 +40,9 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-ATTFileMgr::ATTFileMgr(Fspath                                _dir,
-                       std::vector<std::string>              _counters,
-                       rocprof_trace_decoder_handle_t        _decoder)
+ATTFileMgr::ATTFileMgr(Fspath                         _dir,
+                       std::vector<std::string>       _counters,
+                       rocprof_trace_decoder_handle_t _decoder)
 : dir(std::move(_dir))
 , decoder(_decoder)
 {

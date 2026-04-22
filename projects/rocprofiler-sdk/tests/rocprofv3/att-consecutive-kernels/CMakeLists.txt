@@ -48,9 +48,9 @@ endif()
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-consecutive-kernels
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att
-        --att-consecutive-kernels 8 -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out
-        --log-level env -- $<TARGET_FILE:vector-ops>
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-consecutive-kernels 8 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --log-level env --
+        $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"

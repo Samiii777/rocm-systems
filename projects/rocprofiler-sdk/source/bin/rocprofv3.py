@@ -287,7 +287,6 @@ def resolve_library_path(val, args, is_sdk_lib=True):
     return val
 
 
-
 class booleanArgAction(argparse.Action):
     def __call__(self, parser, args, value, option_string=None):
         setattr(args, self.dest, strtobool(value))
