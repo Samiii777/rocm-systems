@@ -2392,8 +2392,7 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   constexpr uint32_t kFillType = FillBufferUnAligned;
 
   cl_mem mem = as_cl<amd::Memory>(memory.owner());
-  bool isGraphPktCapturing =
-      gpu().command() != nullptr && gpu().command()->getPktCapturingState();
+  bool isGraphPktCapturing = gpu().command() != nullptr && gpu().command()->getPktCapturingState();
   unsigned char* kernArgBase =
       isGraphPktCapturing
           ? (unsigned char*)gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
@@ -2410,8 +2409,7 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
 
   // For 1- and 2-byte patterns, tile the pattern to fill a 32-bit value.
   // For 4-byte patterns, copy the pattern bytes directly.
-  assert(patternSize <= sizeof(uint32_t) &&
-         "Don't currently support patterns larger than 32 bits");
+  assert(patternSize <= sizeof(uint32_t) && "Don't currently support patterns larger than 32 bits");
   body_pattern.pattern = static_cast<int32_t>(tilePatternToUint32(pattern, patternSize));
 
   // Construct tiled body
@@ -2435,8 +2433,7 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   uintptr_t tile_end = alignDown(four_aligned_end, tile_size);
 
   const size_t head_count = four_aligned_start - fill_buf_addr;
-  const size_t body_tile_count =
-      (tile_end > tile_start) ? (tile_end - tile_start) / tile_size : 0;
+  const size_t body_tile_count = (tile_end > tile_start) ? (tile_end - tile_start) / tile_size : 0;
   const size_t body_count =
       (tile_start > four_aligned_start)
           ? static_cast<size_t>((tile_start - four_aligned_start) / sizeof(int32_t))
@@ -2457,11 +2454,10 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
                              body_tail_count * sizeof(int32_t);
   const size_t body_offset = head_count;
   const size_t body_tail_offset =
-      head_count + body_count * sizeof(int32_t) +
-      body_tile_count * (sizeof(ulong) * 2);
+      head_count + body_count * sizeof(int32_t) + body_tile_count * (sizeof(ulong) * 2);
   const size_t tile_offset = static_cast<size_t>(tile_start - fill_buf_addr);
-  const int isAligned = (head_count == 0 && body_count == 0 &&
-                         body_tail_count == 0 && tail_count == 0) ? 1 : 0;
+  const int isAligned =
+      (head_count == 0 && body_count == 0 && body_tail_count == 0 && tail_count == 0) ? 1 : 0;
 
   constexpr size_t localWorkSize = 256;
   const size_t work_items = std::max(alignUp(body_tile_count, localWorkSize), localWorkSize);

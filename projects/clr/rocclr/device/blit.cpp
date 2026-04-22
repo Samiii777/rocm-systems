@@ -744,8 +744,6 @@ void HostBlitManager::FillBufferInfo::PackInfo(const device::Memory& memory, siz
   guarantee(fill_size >= pattern_size, "Pattern Size: %u cannot be greater than fill size: %u \n",
             pattern_size, fill_size);
 
-  // TODO: Remove old 3 kernel path entirely
-
   // 2. Calculate the next closest dword aligned address for faster processing
   size_t dst_addr = memory.virtualAddress() + fill_origin;
   size_t aligned_dst_addr = amd::alignUp(dst_addr, kExtendedSize);
