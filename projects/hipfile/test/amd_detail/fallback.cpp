@@ -391,6 +391,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnPwriteException)
     EXPECT_CALL(mhip, hipStreamSynchronize);
     EXPECT_CALL(msys, pwrite).WillOnce(testing::Throw(std::system_error(EIO, std::generic_category())));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
 
     ASSERT_THROW(Fallback().io(IoType::Write, file, buffer, buffer->getLength(), 0, 0), std::system_error);
 }
@@ -401,6 +402,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnHipmemcpyFailure)
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(mhip, hipMemcpy).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
 
     ASSERT_THROW(Fallback().io(IoType::Write, file, buffer, buffer->getLength(), 0, 0), Hip::RuntimeError);
 }
@@ -412,6 +414,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnHipStreamSynchronizeError)
     EXPECT_CALL(mhip, hipMemcpy);
     EXPECT_CALL(mhip, hipStreamSynchronize).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
 
     ASSERT_THROW(Fallback().io(IoType::Write, file, buffer, buffer->getLength(), 0, 0), Hip::RuntimeError);
 }
@@ -590,6 +593,7 @@ TEST_F(FallbackRead, FallbackReadThrowsOnPreadException)
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(msys, pread).WillOnce(testing::Throw(std::system_error(EIO, std::generic_category())));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
     ASSERT_THROW(Fallback().io(IoType::Read, file, buffer, 4096, 0, 0), std::system_error);
 }
 
@@ -603,6 +607,8 @@ TEST_F(FallbackRead, FallbackReadThrowsOnHipmemcpyFailure)
     EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_pread));
     EXPECT_CALL(mhip, hipMemcpy).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
+
     ASSERT_THROW(Fallback().io(IoType::Read, file, buffer, file_length, 0, 0), Hip::RuntimeError);
 }
 
