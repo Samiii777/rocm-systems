@@ -379,8 +379,12 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
     }
   }
 
-  // Search per-device va maps on Windows (due to overlapping ranges)
-  if (IS_WINDOWS && dev != nullptr) {
+  // Fall back to the per-device VA map:
+  //  - Windows: Search per-device va maps due to overlapping ranges.
+  //  - Linux without HMM: the global map does not track host memory registered via
+  //    hipHostRegister and accessed through the device pointer returned by
+  //    hipHostGetDevicePointer; look it up in the device memory map instead.
+  if (dev != nullptr && (IS_WINDOWS || !dev->info().hmmSupported_)) {
     return dev->FindDevMemObj(k, offset);
   }
 
