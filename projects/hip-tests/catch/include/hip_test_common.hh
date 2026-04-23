@@ -34,6 +34,19 @@
 #define HIP_TEMPLATE_TEST_CASE(name, ...) TEMPLATE_TEST_CASE(#name, "", __VA_ARGS__)
 #endif
 
+/**
+ * @brief Check if running at quick level (level_0).
+ * Use this to reduce test parameters for faster execution.
+ */
+inline bool isQuickLevel() {
+  static int cached = -1;
+  if (cached < 0) {
+    const char* level = std::getenv("HIP_TEST_LEVEL");
+    cached = (level && std::string(level) == "level_0") ? 1 : 0;
+  }
+  return cached == 1;
+}
+
 #if HT_LINUX
 #include <sys/resource.h>
 #endif
