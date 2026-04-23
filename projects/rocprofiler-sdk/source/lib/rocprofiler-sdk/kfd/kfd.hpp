@@ -40,6 +40,9 @@ rocprofiler_status_t
 init();
 
 void
+sync();
+
+void
 finalize();
 }  // namespace kfd
 }  // namespace rocprofiler

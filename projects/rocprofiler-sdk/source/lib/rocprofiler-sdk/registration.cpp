@@ -780,6 +780,7 @@ invoke_client_detaches()
     {
         if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_detach)
         {
+            kfd::sync();
             context::stop_client_contexts(itr->internal_client_id);
 
             hsa::async_copy_sync();
@@ -817,6 +818,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
         if(itr && itr->internal_client_id.handle == client_id.handle &&
            itr->mutable_client_id.handle == client_id.handle)
         {
+            kfd::sync();
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {

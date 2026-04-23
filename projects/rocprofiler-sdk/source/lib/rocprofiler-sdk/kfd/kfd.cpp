@@ -51,8 +51,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <condition_variable>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <ratio>
 #include <stdexcept>
 #include <string>
@@ -800,7 +802,15 @@ get_contexts(rocprofiler_buffer_tracing_kind_t event_kind)
     return operation_ctxs;
 }
 
-void poll_events(small_vector<pollfd>);
+struct poll_control_state
+{
+    std::mutex              sync_mutex            = {};
+    std::condition_variable sync_cv               = {};
+    uint64_t                sync_request_count    = 0;
+    uint64_t                sync_completed_count  = 0;
+};
+
+void poll_events(small_vector<pollfd>, std::shared_ptr<poll_control_state>);
 
 }  // namespace
 
@@ -885,6 +895,7 @@ struct poll_kfd_t
     kfd_device_fd kfd_fd        = {};
     pollfd        thread_notify = {};
     std::thread   bg_thread     = {};
+    std::shared_ptr<poll_control_state> control_state = std::make_shared<poll_control_state>();
     bool          active        = {false};
 
     poll_kfd_t() = default;
@@ -947,7 +958,7 @@ struct poll_kfd_t
 
         // start bg thread
         internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-        bg_thread = std::thread{poll_events, file_handles};
+        bg_thread = std::thread{poll_events, file_handles, control_state};
         internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
 
         active = true;
@@ -978,6 +989,33 @@ struct poll_kfd_t
         close(thread_notify.fd);
     }
 
+    void sync()
+    {
+        if(!active) return;
+
+        uint64_t sync_request_id = 0;
+        {
+            auto _lk = std::unique_lock<std::mutex>{control_state->sync_mutex};
+            sync_request_id = ++control_state->sync_request_count;
+        }
+
+        auto bytes_written{-1};
+        do
+        {
+            bytes_written = write(thread_notify.fd, "S", 1);
+        } while(bytes_written == -1 && (errno == EINTR || errno == EAGAIN));
+
+        if(bytes_written != 1)
+        {
+            ROCP_CI_LOG(WARNING) << "Failed to signal KFD background thread sync request";
+            return;
+        }
+
+        auto _lk = std::unique_lock<std::mutex>{control_state->sync_mutex};
+        control_state->sync_cv.wait(
+            _lk, [&]() { return control_state->sync_completed_count >= sync_request_id; });
+    }
+
     node_fd_t get_node_fd(int gpu_node_id) const
     {
         kfd_ioctl_smi_events_args args{};
@@ -1006,6 +1044,11 @@ private:
 
 public:
     static void init(const small_vector<size_t>& event_ids) { _config = new config{event_ids}; }
+
+    static void sync()
+    {
+        if(_config) _config->kfd_handle.sync();
+    }
 
     static void reset()
     {
@@ -1473,15 +1516,16 @@ handle_reporting(std::string_view event_data)
 }
 
 void
-poll_events(small_vector<pollfd> file_handles)
+poll_events(small_vector<pollfd> file_handles, std::shared_ptr<poll_control_state> control_state)
 {
     // storage to write records to, 1MB
     constexpr size_t PREALLOCATE_ELEMENT_COUNT{1024 * 128};
     // Give KFD a short grace period to deliver teardown-triggered events after shutdown starts.
     constexpr int    SHUTDOWN_DRAIN_TIMEOUT_MS = 50;
     std::string      scratch_buffer(PREALLOCATE_ELEMENT_COUNT, '\0');
-    auto&            exitfd = file_handles[1];
+    auto&            controlfd = file_handles[1];
     bool             shutdown_requested = false;
+    bool             sync_requested     = false;
 
     // Wait or spin on events.
     //  0 -> return immediately even if no events
@@ -1499,7 +1543,8 @@ poll_events(small_vector<pollfd> file_handles)
     {
         auto poll_ret = poll(file_handles.data(),
                              file_handles.size(),
-                             (shutdown_requested) ? SHUTDOWN_DRAIN_TIMEOUT_MS : -1);
+                             (shutdown_requested || sync_requested) ? SHUTDOWN_DRAIN_TIMEOUT_MS
+                                                                    : -1);
 
         if(poll_ret == -1)
         {
@@ -1508,21 +1553,32 @@ poll_events(small_vector<pollfd> file_handles)
             return;
         }
 
-        if((exitfd.revents & POLLIN) != 0)
+        if((controlfd.revents & POLLIN) != 0)
         {
-            // Consume the shutdown notification so subsequent polls can wait briefly for any
+            // Consume control notifications so subsequent polls can wait briefly for any
             // teardown-triggered KFD events that have not been published yet.
-            char    shutdown_signal = '\0';
+            char    control_signal = '\0';
             ssize_t read_ret        = -1;
             do
             {
-                read_ret = read(exitfd.fd, &shutdown_signal, 1);
+                read_ret = read(controlfd.fd, &control_signal, 1);
             } while(read_ret == -1 && errno == EINTR);
 
             ROCP_CI_LOG_IF(WARNING, read_ret != 1)
-                << "Failed to consume KFD background thread shutdown signal";
-            shutdown_requested = true;
-            exitfd.revents     = 0;
+                << "Failed to consume KFD background thread control signal";
+
+            if(read_ret == 1)
+            {
+                if(control_signal == 'E')
+                    shutdown_requested = true;
+                else if(control_signal == 'S')
+                    sync_requested = true;
+                else
+                    ROCP_CI_LOG(WARNING)
+                        << "Unknown KFD background thread control signal: " << control_signal;
+            }
+
+            controlfd.revents = 0;
         }
 
         bool processed_gpu_events = false;
@@ -1543,6 +1599,19 @@ poll_events(small_vector<pollfd> file_handles)
             fd.revents = 0;
         }
 
+        if(sync_requested && !processed_gpu_events)
+        {
+            {
+                auto _lk = std::unique_lock<std::mutex>{control_state->sync_mutex};
+                control_state->sync_completed_count = control_state->sync_request_count;
+            }
+            control_state->sync_cv.notify_all();
+            sync_requested = false;
+        }
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
         if(shutdown_requested && !processed_gpu_events)
         {
             for(const auto& f : file_handles)
@@ -1687,6 +1756,12 @@ void
 finalize()
 {
     config::reset();
+}
+
+void
+sync()
+{
+    config::sync();
 }
 
 const char*
