@@ -26,6 +26,7 @@ def test_run_accepts_known_flags(tmp_path: Path, monkeypatch):
     fake = mock.MagicMock(return_value=mock.MagicMock(
         returncode=0, stdout=b"", stderr=b""
     ))
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", mock.MagicMock())
     monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", fake)
 
     result = profile_runner.run(
@@ -55,6 +56,7 @@ def test_run_strips_api_keys_from_env(tmp_path: Path, monkeypatch):
         return mock.MagicMock(returncode=0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", mock.MagicMock())
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-leak")
 
     profile_runner.run(argv=["rocprofv3", "--sys-trace", "--", "./app"], cwd=tmp_path)
@@ -73,6 +75,7 @@ def test_run_respects_timeout(tmp_path: Path, monkeypatch):
         raise _sp.TimeoutExpired(cmd=a[0], timeout=kw.get("timeout", 10))
 
     monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", raise_timeout)
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", mock.MagicMock())
     with pytest.raises(_sp.TimeoutExpired):
         profile_runner.run(
             argv=["rocprofv3", "--sys-trace", "--", "./app"],

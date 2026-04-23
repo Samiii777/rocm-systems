@@ -37,6 +37,7 @@ def test_build_accepts_allowlisted_flags(tmp_path: Path, monkeypatch):
     fake_run = mock.MagicMock(return_value=mock.MagicMock(
         returncode=0, stdout=b"", stderr=b""
     ))
+    monkeypatch.setattr("perfxpert.tools.compile_runner.require_tool", mock.MagicMock())
     monkeypatch.setattr("perfxpert.tools.compile_runner.subprocess.run", fake_run)
 
     result = compile_runner.build(
@@ -75,6 +76,7 @@ def test_build_uses_safe_env(tmp_path: Path, monkeypatch):
         return mock.MagicMock(returncode=0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr("perfxpert.tools.compile_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("perfxpert.tools.compile_runner.require_tool", mock.MagicMock())
     compile_runner.build(project_root=tmp_path, source_rel="src.cpp", flags=["-O2"])
 
     assert "ANTHROPIC_API_KEY" not in captured_env
@@ -91,6 +93,7 @@ def test_build_parses_error_output(tmp_path: Path, monkeypatch):
             stderr=b"src.cpp:1:1: error: expected unqualified-id\n",
         )),
     )
+    monkeypatch.setattr("perfxpert.tools.compile_runner.require_tool", mock.MagicMock())
     result = compile_runner.build(project_root=tmp_path, source_rel="src.cpp", flags=["-O2"])
     assert result["returncode"] == 1
     assert "error: expected unqualified-id" in result["stderr"]
