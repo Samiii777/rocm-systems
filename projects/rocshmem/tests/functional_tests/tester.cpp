@@ -69,6 +69,7 @@
 #include "flood_amo_tester.hpp"
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
+#include "library_info_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -233,6 +234,11 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamCtxInfraTestOddEvenType:
       if (rank == 0) std::cout << "Team Ctx Infra Odd-Even test ###" << std::endl;
       args.team_type = ROCSHMEM_TEST_TEAM_ODDEVEN;
+      testers.push_back(new TeamCtxInfraTester(args));
+      return testers;
+    case TeamCtxSharedInfraTestType:
+      if (rank == 0) std::cout << "Team Ctx Infra Shared test ###" << std::endl;
+      args.team_type = ROCSHMEM_TEST_TEAM_SHARED;
       testers.push_back(new TeamCtxInfraTester(args));
       return testers;
     case TeamCtxGetTestType:
@@ -650,6 +656,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
       testers.push_back(new DeviceBitcodeTester(args));
       return testers;
+    case LibraryInfoTestType:
+      if (rank == 0) std::cout << "Library Info Test ###" << std::endl;
+      testers.push_back(new LibraryInfoTester(args));
+      return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -721,7 +731,8 @@ void Tester::execute() {
     if (_type != TeamCtxInfraTestType       &&
         _type != TeamCtxInfraTestSingleType &&
         _type != TeamCtxInfraTestBlockType  &&
-        _type != TeamCtxInfraTestOddEvenType ) {
+        _type != TeamCtxInfraTestOddEvenType &&
+        _type != TeamCtxSharedInfraTestType ) {
       print(size);
     }
   }
@@ -743,6 +754,7 @@ bool Tester::peLaunchesKernel() {
     case TeamCtxInfraTestSingleType:
     case TeamCtxInfraTestBlockType:
     case TeamCtxInfraTestOddEvenType:
+    case TeamCtxSharedInfraTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamFCollectTestType:

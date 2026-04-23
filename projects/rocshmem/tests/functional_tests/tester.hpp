@@ -132,6 +132,8 @@ enum TestType {
   FloodFAddTestType = 91,
   FloodWaitAmoTestType = 92,
   DeviceBitcodeTestType = 93,
+  LibraryInfoTestType = 94,
+  TeamCtxSharedInfraTestType = 95,
   QuietOnStreamTestType = 96,
   SyncAllOnStreamTestType = 97,
 };
