@@ -424,11 +424,13 @@ static void doMemsetTest(allocType mallocType, memSetType memset_type, MultiDDat
 }
 
 HIP_TEST_CASE(Unit_hipMemsetSync) {
-  allocType type = GENERATE(allocType::deviceMalloc, allocType::hostMalloc, allocType::hostRegisted,
-                            allocType::devRegistered);
+  allocType type = isQuickLevel()
+      ? GENERATE(allocType::deviceMalloc)
+      : GENERATE(allocType::deviceMalloc, allocType::hostMalloc, allocType::hostRegisted,
+                 allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset;
   MultiDData data;
-  data.width = GENERATE(512, 1024);
+  data.width = isQuickLevel() ? 512 : GENERATE(512, 1024);
   doMemsetTest<char>(type, memset_type, data);
 }
 
@@ -451,24 +453,28 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemsetDSync, int8_t, int16_t, uint32_t) {
 }
 
 HIP_TEST_CASE(Unit_hipMemset2DSync) {
-  allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
-                                  allocType::hostRegisted, allocType::devRegistered);
+  allocType mallocType = isQuickLevel()
+      ? GENERATE(allocType::deviceMalloc)
+      : GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
+                 allocType::hostRegisted, allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset2D;
   MultiDData data;
-  data.width = GENERATE(512, 1024);
-  data.height = GENERATE(512, 1024);
+  data.width = isQuickLevel() ? 512 : GENERATE(512, 1024);
+  data.height = isQuickLevel() ? 512 : GENERATE(512, 1024);
 
   doMemsetTest<char>(mallocType, memset_type, data);
 }
 
 HIP_TEST_CASE(Unit_hipMemset3DSync) {
-  allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
-                                  allocType::hostRegisted, allocType::devRegistered);
+  allocType mallocType = isQuickLevel()
+      ? GENERATE(allocType::deviceMalloc)
+      : GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
+                 allocType::hostRegisted, allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset3D;
   MultiDData data;
-  data.width = GENERATE(128, 256);
-  data.height = GENERATE(128, 256);
-  data.depth = GENERATE(128, 256);
+  data.width = isQuickLevel() ? 128 : GENERATE(128, 256);
+  data.height = isQuickLevel() ? 128 : GENERATE(128, 256);
+  data.depth = isQuickLevel() ? 128 : GENERATE(128, 256);
 
   doMemsetTest<char>(mallocType, memset_type, data);
 }

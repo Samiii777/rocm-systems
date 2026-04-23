@@ -102,9 +102,11 @@ HIP_TEST_CASE(Unit_hipHostMalloc_CoherentTst) {
   SECTION("hipHostMalloc with hipHostMallocCoherent flag") {
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocCoherent));
   }
-  SECTION("hipHostMalloc with Default flag") { HIP_CHECK(hipHostMalloc(&Ptr, SIZE)); }
-  SECTION("hipHostMalloc with hipHostMallocMapped flag") {
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocMapped));
+  if (!isQuickLevel()) {
+    SECTION("hipHostMalloc with Default flag") { HIP_CHECK(hipHostMalloc(&Ptr, SIZE)); }
+    SECTION("hipHostMalloc with hipHostMallocMapped flag") {
+      HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocMapped));
+    }
   }
 
   TstCoherency(Ptr, MemoryType::kHostMalloc);
