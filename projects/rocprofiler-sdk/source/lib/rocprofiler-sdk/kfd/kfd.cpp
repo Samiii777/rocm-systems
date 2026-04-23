@@ -810,7 +810,7 @@ struct poll_control_state
     uint64_t                sync_completed_count  = 0;
 };
 
-void poll_events(small_vector<pollfd>, std::shared_ptr<poll_control_state>);
+void poll_events(small_vector<pollfd>, const std::shared_ptr<poll_control_state>&);
 
 }  // namespace
 
