@@ -1516,7 +1516,7 @@ handle_reporting(std::string_view event_data)
 }
 
 void
-poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_control_state> control_state)
+poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_control_state> &control_state)
 {
     // storage to write records to, 1MB
     constexpr size_t PREALLOCATE_ELEMENT_COUNT{1024 * 128};
