@@ -41,7 +41,9 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
+#include <vector>
 
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \
@@ -74,6 +76,9 @@ check_hip_error(void);
 
 void
 verify(int* in, int* out, int M, int N);
+
+bool
+use_managed_memory(void);
 }  // namespace
 
 __global__ void
@@ -119,6 +124,7 @@ main(int argc, char** argv)
     printf("[transpose] Number of iterations: %zu\n", nitr);
     printf("[transpose] Syncing every %zu iterations\n", nsync);
     printf("[transpose] Matrix dimensions: %zu x %zu\n", matrix_rows, matrix_cols);
+    printf("[transpose] Managed memory mode: %s\n", use_managed_memory() ? "enabled" : "disabled");
 
 #if defined(USE_ROCTRACER_ROCTX)
     {
@@ -205,6 +211,7 @@ void
 run(int rank, int tid, int devid, int argc, char** argv)
 {
     auto roctx_run_id = roctxRangeStart("run");
+    const auto managed_memory_enabled = use_managed_memory();
 
     const auto mark = [rank, tid, devid](std::string_view suffix) {
         auto _ss = std::stringstream{};
@@ -259,16 +266,37 @@ run(int rank, int tid, int devid, int argc, char** argv)
                   << "] Available GPU memory (MiB): " << std::setw(6) << free_gpu_mem << " / "
                   << std::setw(6) << total_gpu_mem << std::endl;
 
-        HIP_API_CALL(hipMallocAsync(&in, size, stream));
-        HIP_API_CALL(hipMallocAsync(&out, size, stream));
+        if(managed_memory_enabled)
+        {
+            HIP_API_CALL(hipMallocManaged(&in, size));
+            HIP_API_CALL(hipMallocManaged(&out, size));
+        }
+        else
+        {
+            HIP_API_CALL(hipMallocAsync(&in, size, stream));
+            HIP_API_CALL(hipMallocAsync(&out, size, stream));
+        }
 
         _lk.unlock();
     }
 
-    HIP_API_CALL(hipMemsetAsync(in, 0, size, stream));
-    HIP_API_CALL(hipMemsetAsync(out, 0, size, stream));
-    HIP_API_CALL(hipMemcpyAsync(in, inp_matrix.data(), size, hipMemcpyHostToDevice, stream));
-    HIP_API_CALL(hipStreamSynchronize(stream));
+    if(managed_memory_enabled)
+    {
+        // Host initialization keeps the managed pages CPU-resident so the kernel
+        // must fault or migrate them when KFD tracing is enabled.
+        for(size_t i = 0; i < element_count; ++i)
+        {
+            in[i]  = inp_matrix[i];
+            out[i] = 0;
+        }
+    }
+    else
+    {
+        HIP_API_CALL(hipMemsetAsync(in, 0, size, stream));
+        HIP_API_CALL(hipMemsetAsync(out, 0, size, stream));
+        HIP_API_CALL(hipMemcpyAsync(in, inp_matrix.data(), size, hipMemcpyHostToDevice, stream));
+        HIP_API_CALL(hipStreamSynchronize(stream));
+    }
 
     dim3 grid(M / 32, N / 32, 1);
     dim3 block(32, 32, 1);  // transpose
@@ -289,7 +317,10 @@ run(int rank, int tid, int devid, int argc, char** argv)
     }
     auto t2 = std::chrono::high_resolution_clock::now();
     HIP_API_CALL(hipStreamSynchronize(stream));
-    HIP_API_CALL(hipMemcpyAsync(out_matrix.data(), out, size, hipMemcpyDeviceToHost, stream));
+    if(!managed_memory_enabled)
+    {
+        HIP_API_CALL(hipMemcpyAsync(out_matrix.data(), out, size, hipMemcpyDeviceToHost, stream));
+    }
     double time = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
     float  GB   = (float) size * nitr * 2 / (1 << 30);
 
@@ -304,12 +335,22 @@ run(int rank, int tid, int devid, int argc, char** argv)
     HIP_API_CALL(hipStreamSynchronize(stream));
 
     // cpu_transpose(matrix, out_matrix, M, N);
-    verify(inp_matrix.data(), out_matrix.data(), M, N);
+    verify((managed_memory_enabled) ? in : inp_matrix.data(),
+           (managed_memory_enabled) ? out : out_matrix.data(),
+           M,
+           N);
 
-    HIP_API_CALL(hipFreeAsync(in, stream));
-    HIP_API_CALL(hipFreeAsync(out, stream));
-
-    HIP_API_CALL(hipStreamSynchronize(stream));
+    if(managed_memory_enabled)
+    {
+        HIP_API_CALL(hipFree(in));
+        HIP_API_CALL(hipFree(out));
+    }
+    else
+    {
+        HIP_API_CALL(hipFreeAsync(in, stream));
+        HIP_API_CALL(hipFreeAsync(out, stream));
+        HIP_API_CALL(hipStreamSynchronize(stream));
+    }
     HIP_API_CALL(hipStreamDestroy(stream));
 
     mark("end");
@@ -319,6 +360,13 @@ run(int rank, int tid, int devid, int argc, char** argv)
 
 namespace
 {
+bool
+use_managed_memory(void)
+{
+    auto* env = getenv("TRANSPOSE_USE_MANAGED_MEMORY");
+    return (env != nullptr) && (env[0] != '\0') && (env[0] != '0');
+}
+
 void
 check_hip_error(void)
 {
