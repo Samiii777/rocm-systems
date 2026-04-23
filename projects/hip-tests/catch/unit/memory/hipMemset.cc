@@ -21,11 +21,14 @@ Testcase Scenarios :
 // Table with unique number of elements and memset values.
 // (N, memsetval, memsetD32val, memsetD16val, memsetD8val)
 typedef std::tuple<size_t, char, int, int16_t, char> tupletype;
-static constexpr std::initializer_list<tupletype> tableItems{
+static const std::initializer_list<tupletype> tableItems_full{
     std::make_tuple((4 * 1024 * 1024), 0x42, 0xDEADBEEF, 0xDEAD, 0xDE),
     std::make_tuple((10), 0x42, 0x101, 0x10, 0x1),
     std::make_tuple((10013), 0x5a, 0xDEADBEEF, 0xDEAD, 0xDE),
     std::make_tuple((256 * 1024 * 1024), 0xa6, 0xCAFEBABE, 0xCAFE, 0xCA)};
+static const std::initializer_list<tupletype> tableItems_quick{
+    std::make_tuple((10), 0x42, 0x101, 0x10, 0x1)};
+static const auto& tableItems = isQuickLevel() ? tableItems_quick : tableItems_full;
 
 enum MemsetType { hipMemsetTypeDefault, hipMemsetTypeD8, hipMemsetTypeD16, hipMemsetTypeD32 };
 

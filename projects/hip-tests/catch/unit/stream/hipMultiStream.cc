@@ -25,9 +25,9 @@ __global__ void nKernel(float* y) {
   y[tid] = y[tid] + 1.0f;
 }
 HIP_TEST_CASE(Unit_hipMultiStream_sameDevice) {
-  constexpr int num_streams{8};
-  hipStream_t streams[num_streams];
-  float *data[num_streams], *yd, *xd;
+  const int num_streams = isQuickLevel() ? 1 : 8;
+  hipStream_t streams[8];
+  float *data[8], *yd, *xd;
   float y{1.0f}, x{1.0f};
   HIP_CHECK(hipMalloc((void**)&yd, sizeof(float)));
   HIP_CHECK(hipMalloc((void**)&xd, sizeof(float)));

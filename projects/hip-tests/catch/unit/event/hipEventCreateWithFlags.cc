@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 constexpr size_t buffer_size = (1024 * 1024);
-constexpr int test_iteration_hstvismem = 5;
+static const int test_iteration_hstvismem = isQuickLevel() ? 1 : 5;
 constexpr int test_iteration_noncohmem = 10;
 constexpr int block_size = 512;
 

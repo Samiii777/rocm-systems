@@ -209,15 +209,17 @@ HIP_TEST_CASE(Unit_hipTestHalf) {
     HIP_CHECK(hipDeviceSynchronize());
     REQUIRE(result[0] == true);
   }
-  SECTION("Test half math") {
-    result[0] = false;
-    hipLaunchKernelGGL(__half2Math, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half2{1, 1});
-    HIP_CHECK(hipDeviceSynchronize());
-    REQUIRE(result[0] == true);
-  }
-  SECTION("Functional checks") {
-    checkFunctional();
-    checkHalfAbs();
+  if (!isQuickLevel()) {
+    SECTION("Test half2 math") {
+      result[0] = false;
+      hipLaunchKernelGGL(__half2Math, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half2{1, 1});
+      HIP_CHECK(hipDeviceSynchronize());
+      REQUIRE(result[0] == true);
+    }
+    SECTION("Functional checks") {
+      checkFunctional();
+      checkHalfAbs();
+    }
   }
   HIP_CHECK(hipHostFree(result));
 }

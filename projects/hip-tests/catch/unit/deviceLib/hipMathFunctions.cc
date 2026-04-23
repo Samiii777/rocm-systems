@@ -109,8 +109,10 @@ HIP_TEST_CASE(Unit_abs_int64_Verification) {
  */
 HIP_TEST_CASE(Unit_pown_Verification) {
   CHECK_SIMPLE([] __device__() { return powif(2.0f, 2); }, 4.0f);
-  CHECK_SIMPLE([] __device__() { return powi(2.0, 2); }, 4.0);
-  CHECK_SIMPLE([] __device__() { return pow(2.0f, 2); }, 4.0f);
-  CHECK_SIMPLE([] __device__() { return pow(2.0, 2); }, 4.0);
+  if (!isQuickLevel()) {
+    CHECK_SIMPLE([] __device__() { return powi(2.0, 2); }, 4.0);
+    CHECK_SIMPLE([] __device__() { return pow(2.0f, 2); }, 4.0f);
+    CHECK_SIMPLE([] __device__() { return pow(2.0, 2); }, 4.0);
+  }
   CHECK_SIMPLE([] __device__() { return pow(2.0f16, 2); }, 4.0f16);
 }

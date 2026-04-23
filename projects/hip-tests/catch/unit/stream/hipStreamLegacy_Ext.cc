@@ -758,13 +758,16 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_WithKernel) {
 
   HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
   addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, N);
-  addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, N);
+  if (!isQuickLevel()) {
+    addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, N);
+  }
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
+  int expected = isQuickLevel() ? 2 : 3;
   for (int i = 0; i < N; i++) {
-    INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 3 \n");
-    REQUIRE(hostArrDst[i] == 3);
+    INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : " << expected << " \n");
+    REQUIRE(hostArrDst[i] == expected);
   }
 
   delete[] hostArrSrc;
