@@ -6,21 +6,24 @@
 
 ## Overview
 
-13 P0 tests trimmed across 13 source files using `isQuickLevel()` gating.
+16 P0 tests trimmed across 16 source files using `isQuickLevel()` gating.
 At `HIP_TEST_LEVEL=level_0`, tests use reduced parameters for faster
 execution. At `level_2` (default), original behavior is preserved.
 
 ---
 
-## Commit 1: Trim 5 P0 tests for level_0
+## Commit 1: Trim 8 P0 tests for level_0
 
 | Test | Change | File |
 |---|---|---|
 | Unit_hipStreamEndCapture_Positive_GraphDestroy | N: 1M to 10K | graph/hipStreamEndCapture.cc |
 | Unit_hipStreamIsCapturing_Positive_Basic | N: 1M to 10K | graph/hipStreamIsCapturing.cc |
+| Unit_hipStreamBeginCapture_Positive_Basic | N: 1M to 10K | graph/hipStreamBeginCapture.cc |
 | Unit_hipMemPoolTrimTo_Positive_Basic | N: 1M to 4K | memory/hipMemPoolTrimTo.cc |
 | Unit_hipMemset2DAsync_BasicFunctional | rows/cols: drop 100 from GENERATE | memory/hipMemset2D.cc |
+| Unit_hipMalloc3D_Basic | dims: 64MB to 10x10x10 | memory/hipMalloc3D.cc |
 | Unit_hipGetProcAddress_ValidateDeviceApis | array size: 20 to 13 | device/hipGetProcAddressDevMgmt.cc |
+| Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities | MEMCPYSIZE: 64MB/1MB to 100KB | stream/hipStreamCreateWithPriority.cc |
 
 ---
 

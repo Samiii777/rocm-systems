@@ -59,7 +59,9 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
   static constexpr int ChunkSize = 64;  // (in megabytes)
   static constexpr int NumAllocations = 3;
 
-  size_t width{(ChunkSize * 1024) / NumAllocations}, height{1024}, depth{1};
+  size_t width = isQuickLevel() ? 10 : (ChunkSize * 1024) / NumAllocations;
+  size_t height = isQuickLevel() ? 10 : 1024;
+  size_t depth = isQuickLevel() ? 10 : 1;
   hipPitchedPtr devPitchedPtr[NumAllocations];
   hipExtent extent = make_hipExtent(width, height, depth);
   size_t tot, avail, itot, iavail, ptot, pavail;
