@@ -6,6 +6,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
+
 * Incomplete dispatch counter filtering in analyze mode. Dispatches with partially collected counters (containing NaN values) now have all their counter values set to NaN before metric calculation. This ensures aggregation functions (SUM, AVG) operate over the same set of dispatches for every counter, preventing mathematically inconsistent metrics.
 
 * Multi-kernel analysis warning. When a workload contains multiple kernels and no kernel or dispatch filter is applied, a warning is now displayed recommending the use of `--list-stats` and `-k`/`--kernel` to inspect results for a specific kernel.
@@ -26,7 +28,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed `inf` display for metrics with zero-denominator counters (e.g., L2-Fabric Write Latency when no write requests are issued). The metric evaluation path now catches `inf` scalar results and returns `"N/A"`, consistent with existing `NaN` handling.
 
-* Fixed MFMA values showing up as N/A in the gfx9 memory chart diagram (CLI/TUI and web UI).
+* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
 
 * Fixed baseline comparison displaying `0 (0.0%)` instead of `N/A` when counter data is unavailable for either the base or current workload.
 
