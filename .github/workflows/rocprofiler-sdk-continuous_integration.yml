@@ -184,8 +184,10 @@ jobs:
           python3 -m pip install -U --user cmake==3.24.0
           cat /sys/module/amdgpu/version
           ls -la /dev/kfd
-          /opt/rocm/bin/rocminfo | grep -E "Agent|Name"
-          /opt/rocm/bin/rocm-smi
+          groups
+          test -r /dev/kfd && test -w /dev/kfd && echo "YES - can read/write /dev/kfd" || echo "NO - cannot access /dev/kfd"
+          namei -l /dev/kfd
+          ls /sys/class/kfd/kfd/topology/nodes/*/gpu_id 2>/dev/null && echo "GPU IDs found" || echo "No GPU IDs"
           
 
       - name: Build ROCProfiler SDK Dependencies
