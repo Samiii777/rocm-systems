@@ -33,6 +33,7 @@
 #endif
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <iomanip>
@@ -79,6 +80,18 @@ verify(int* in, int* out, int M, int N);
 
 bool
 use_managed_memory(void);
+
+bool
+use_aggressive_managed_memory(void);
+
+void
+perturb_managed_pages(int* data, size_t count, int delta);
+
+void
+zero_managed_pages(int* data, size_t count);
+
+uint64_t
+sample_managed_pages(const int* data, size_t count);
 }  // namespace
 
 __global__ void
@@ -125,6 +138,8 @@ main(int argc, char** argv)
     printf("[transpose] Syncing every %zu iterations\n", nsync);
     printf("[transpose] Matrix dimensions: %zu x %zu\n", matrix_rows, matrix_cols);
     printf("[transpose] Managed memory mode: %s\n", use_managed_memory() ? "enabled" : "disabled");
+    printf("[transpose] Aggressive managed memory mode: %s\n",
+           use_aggressive_managed_memory() ? "enabled" : "disabled");
 
 #if defined(USE_ROCTRACER_ROCTX)
     {
@@ -211,7 +226,8 @@ void
 run(int rank, int tid, int devid, int argc, char** argv)
 {
     auto roctx_run_id = roctxRangeStart("run");
-    const auto managed_memory_enabled = use_managed_memory();
+    const auto managed_memory_enabled    = use_managed_memory();
+    const auto aggressive_managed_memory = managed_memory_enabled && use_aggressive_managed_memory();
 
     const auto mark = [rank, tid, devid](std::string_view suffix) {
         auto _ss = std::stringstream{};
@@ -242,6 +258,7 @@ run(int rank, int tid, int devid, int argc, char** argv)
 
     size_t size          = sizeof(int) * M * N;
     size_t element_count = M * N;
+    uint64_t managed_memory_checksum = 0;
     auto   inp_matrix    = std::vector<int>(element_count);
     auto   out_matrix    = std::vector<int>(element_count);
     for(size_t i = 0; i < element_count; i++)
@@ -305,9 +322,34 @@ run(int rank, int tid, int devid, int argc, char** argv)
     for(size_t i = 0; i < nitr; ++i)
     {
         roctxRangePush("run/iteration");
+        if(aggressive_managed_memory)
+        {
+            roctxRangePush("run/iteration/cpu-touch");
+            perturb_managed_pages(in, element_count, static_cast<int>((i % 7) + 1));
+            zero_managed_pages(out, element_count);
+            managed_memory_checksum += sample_managed_pages(in, element_count);
+            roctxRangePop();
+
+            roctxRangePush("run/iteration/prefetch-gpu");
+            HIP_API_CALL(hipMemPrefetchAsync(in, size, devid, stream));
+            HIP_API_CALL(hipMemPrefetchAsync(out, size, devid, stream));
+            HIP_API_CALL(hipStreamSynchronize(stream));
+            roctxRangePop();
+        }
+
         transpose<<<grid, block, 0, stream>>>(in, out, M, N);
         check_hip_error();
-        if(i % nsync == (nsync - 1))
+        if(aggressive_managed_memory)
+        {
+            roctxRangePush("run/iteration/prefetch-cpu");
+            HIP_API_CALL(hipStreamSynchronize(stream));
+            HIP_API_CALL(hipMemPrefetchAsync(out, size, hipCpuDeviceId, stream));
+            HIP_API_CALL(hipMemPrefetchAsync(in, size, hipCpuDeviceId, stream));
+            HIP_API_CALL(hipStreamSynchronize(stream));
+            managed_memory_checksum += sample_managed_pages(out, element_count);
+            roctxRangePop();
+        }
+        else if(i % nsync == (nsync - 1))
         {
             roctxRangePush("run/iteration/sync");
             HIP_API_CALL(hipStreamSynchronize(stream));
@@ -330,6 +372,11 @@ run(int rank, int tid, int devid, int argc, char** argv)
     std::cout << "[transpose][" << rank << "][" << tid
               << "] The average performance of transpose is " << GB / time << " GBytes/sec"
               << std::endl;
+    if(aggressive_managed_memory)
+    {
+        std::cout << "[transpose][" << rank << "][" << tid
+                  << "] Managed memory page checksum is " << managed_memory_checksum << std::endl;
+    }
     print_lock.unlock();
 
     HIP_API_CALL(hipStreamSynchronize(stream));
@@ -365,6 +412,56 @@ use_managed_memory(void)
 {
     auto* env = getenv("TRANSPOSE_USE_MANAGED_MEMORY");
     return (env != nullptr) && (env[0] != '\0') && (env[0] != '0');
+}
+
+bool
+use_aggressive_managed_memory(void)
+{
+    auto* env = getenv("TRANSPOSE_AGGRESSIVE_MANAGED_MEMORY");
+    return (env != nullptr) && (env[0] != '\0') && (env[0] != '0');
+}
+
+void
+perturb_managed_pages(int* data, size_t count, int delta)
+{
+    if(data == nullptr || count == 0) return;
+
+    constexpr size_t page_stride = 4096 / sizeof(int);
+
+    for(size_t i = 0; i < count; i += page_stride)
+        data[i] += delta;
+
+    if(((count - 1) % page_stride) != 0) data[count - 1] += delta;
+}
+
+void
+zero_managed_pages(int* data, size_t count)
+{
+    if(data == nullptr || count == 0) return;
+
+    constexpr size_t page_stride = 4096 / sizeof(int);
+
+    for(size_t i = 0; i < count; i += page_stride)
+        data[i] = 0;
+
+    if(((count - 1) % page_stride) != 0) data[count - 1] = 0;
+}
+
+uint64_t
+sample_managed_pages(const int* data, size_t count)
+{
+    if(data == nullptr || count == 0) return 0;
+
+    constexpr size_t page_stride = 4096 / sizeof(int);
+    uint64_t         checksum    = 0;
+
+    for(size_t i = 0; i < count; i += page_stride)
+        checksum += static_cast<uint64_t>(static_cast<uint32_t>(data[i]));
+
+    if(((count - 1) % page_stride) != 0)
+        checksum += static_cast<uint64_t>(static_cast<uint32_t>(data[count - 1]));
+
+    return checksum;
 }
 
 void

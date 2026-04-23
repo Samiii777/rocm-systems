@@ -71,6 +71,12 @@ struct kfd_event_record
     } data;
 };
 
+struct kfd_readlines_result
+{
+    size_t handled_lines  = 0;
+    size_t trailing_bytes = 0;
+};
+
 using agent_id_map_t = std::unordered_map<uint64_t, rocprofiler_agent_id_t>;
 
 template <uint32_t>
@@ -152,7 +158,7 @@ parse_event(size_t event_id, const agent_id_map_t& agents, std::string_view strn
 size_t
 get_rocprof_op(const std::string_view event_data);
 
-void
+kfd_readlines_result
 kfd_readlines(const std::string_view str, void(handler)(std::string_view));
 
 using node_fd_t = int;

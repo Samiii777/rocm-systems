@@ -689,9 +689,11 @@ parse_event(size_t event_id, const agent_id_map_t& agents, std::string_view strn
     return parse_event(event_id, agents, strn, std::make_index_sequence<KFD_EVENT_LAST>{});
 }
 
-void
+kfd_readlines_result
 kfd_readlines(const std::string_view str, void(handler)(std::string_view))
 {
+    auto result = kfd_readlines_result{};
+
     const auto  find_newline = [&](auto b) { return std::find(b, str.cend(), '\n'); };
     const auto* cursor       = str.cbegin();
 
@@ -703,9 +705,20 @@ kfd_readlines(const std::string_view str, void(handler)(std::string_view))
 
         ROCP_INFO << fmt::format("KFD event: [{}]", event_str);
         handler(event_str);
+        ++result.handled_lines;
 
         cursor = pos + 1;
     }
+
+    result.trailing_bytes = static_cast<size_t>(str.cend() - cursor);
+    if(result.trailing_bytes > 0)
+    {
+        ROCP_INFO << fmt::format("KFD read buffer ended with {} trailing byte(s) without a "
+                                 "newline terminator; trailing data will be ignored",
+                                 result.trailing_bytes);
+    }
+
+    return result;
 }
 
 // Event capture and reporting
@@ -1555,6 +1568,32 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
     auto&            controlfd = file_handles[1];
     bool             shutdown_requested = false;
     bool             sync_requested     = false;
+    uint64_t         poll_iterations    = 0;
+    uint64_t         poll_timeouts      = 0;
+    uint64_t         control_signals    = 0;
+    uint64_t         gpu_read_calls     = 0;
+    uint64_t         gpu_zero_reads     = 0;
+    uint64_t         gpu_read_failures  = 0;
+    uint64_t         gpu_bytes_read     = 0;
+    uint64_t         parsed_event_lines = 0;
+    uint64_t         trailing_bytes     = 0;
+
+    const auto log_poll_summary = [&](std::string_view reason) {
+        ROCP_INFO << fmt::format("KFD background thread summary ({}) :: polls={} timeouts={} "
+                                 "control_signals={} gpu_reads={} gpu_zero_reads={} "
+                                 "gpu_read_failures={} gpu_bytes={} parsed_event_lines={} "
+                                 "trailing_bytes={}",
+                                 reason,
+                                 poll_iterations,
+                                 poll_timeouts,
+                                 control_signals,
+                                 gpu_read_calls,
+                                 gpu_zero_reads,
+                                 gpu_read_failures,
+                                 gpu_bytes_read,
+                                 parsed_event_lines,
+                                 trailing_bytes);
+    };
 
     // Wait or spin on events.
     //  0 -> return immediately even if no events
@@ -1570,6 +1609,7 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
 
     while(true)
     {
+        ++poll_iterations;
         auto poll_ret = poll(file_handles.data(),
                              file_handles.size(),
                              (shutdown_requested || sync_requested) ? SHUTDOWN_DRAIN_TIMEOUT_MS
@@ -1579,7 +1619,23 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
         {
             ROCP_CI_LOG(WARNING)
                 << "Background thread file descriptors for page-migration are invalid";
+            log_poll_summary("poll_error");
             return;
+        }
+        else if(poll_ret == 0)
+        {
+            ++poll_timeouts;
+            ROCP_INFO << fmt::format("KFD background thread poll timed out while {}",
+                                     shutdown_requested ? "draining shutdown"
+                                                        : "draining sync request");
+        }
+
+        if((controlfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+        {
+            ROCP_CI_LOG(WARNING)
+                << fmt::format("KFD control fd {} reported revents=0x{:x}",
+                               controlfd.fd,
+                               static_cast<unsigned>(controlfd.revents));
         }
 
         if((controlfd.revents & POLLIN) != 0)
@@ -1598,6 +1654,7 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
 
             if(read_ret == 1)
             {
+                ++control_signals;
                 if(control_signal == 'E')
                 {
                     ROCP_INFO << "KFD background thread received shutdown control signal";
@@ -1623,17 +1680,53 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
         {
             auto& fd = file_handles[i];
 
+            if((fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+            {
+                ROCP_CI_LOG(WARNING)
+                    << fmt::format("KFD GPU event fd {} reported revents=0x{:x}",
+                                   fd.fd,
+                                   static_cast<unsigned>(fd.revents));
+            }
+
             // We have data to read, perhaps multiple events
             if((fd.revents & POLLIN) != 0)
             {
                 processed_gpu_events = true;
-                size_t status_size   = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
-                ROCP_INFO << fmt::format(
-                    "KFD background thread read {} byte(s) from GPU event fd {}",
-                    status_size,
-                    fd.fd);
-                auto   event_strings = std::string_view{scratch_buffer.data(), status_size};
-                kfd_readlines(event_strings, handle_reporting);
+                ++gpu_read_calls;
+                ssize_t status_size = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
+                if(status_size < 0)
+                {
+                    ++gpu_read_failures;
+                    ROCP_CI_LOG(WARNING)
+                        << fmt::format("KFD background thread failed to read from GPU event fd {} "
+                                       ":: {}",
+                                       fd.fd,
+                                       strerror(errno));
+                }
+                else if(status_size == 0)
+                {
+                    ++gpu_zero_reads;
+                    ROCP_INFO
+                        << fmt::format("KFD background thread read 0 byte(s) from GPU event fd {}",
+                                       fd.fd);
+                }
+                else
+                {
+                    gpu_bytes_read += static_cast<uint64_t>(status_size);
+                    ROCP_INFO << fmt::format(
+                        "KFD background thread read {} byte(s) from GPU event fd {}",
+                        status_size,
+                        fd.fd);
+                    auto event_strings = std::string_view{
+                        scratch_buffer.data(), static_cast<size_t>(status_size)};
+                    auto read_result = kfd_readlines(event_strings, handle_reporting);
+                    parsed_event_lines += read_result.handled_lines;
+                    trailing_bytes += read_result.trailing_bytes;
+                    ROCP_INFO << fmt::format("KFD background thread parsed {} complete event "
+                                             "line(s) from fd {}",
+                                             read_result.handled_lines,
+                                             fd.fd);
+                }
             }
             fd.revents = 0;
         }
@@ -1646,6 +1739,7 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
             }
             control_state->sync_cv.notify_all();
             ROCP_INFO << "KFD background thread completed sync drain with no additional GPU events";
+            log_poll_summary("sync_complete");
             sync_requested = false;
         }
         if(shutdown_requested && !processed_gpu_events)
@@ -1655,6 +1749,7 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
                 close(f.fd);
             }
             ROCP_INFO << "KFD background thread drained pending events and is exiting";
+            log_poll_summary("shutdown");
             ROCP_INFO << "Terminating background thread\n";
             return;
         }
