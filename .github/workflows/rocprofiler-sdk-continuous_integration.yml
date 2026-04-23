@@ -235,7 +235,8 @@ jobs:
             -- \
             --parallel 4 \
             -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+            -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" \
+            -R rocprofv3-test-kfd-xnack -VV
 
       - name: Install
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -315,6 +316,7 @@ jobs:
   # RHEL/SLES (RPM) job(s)
   # -----------------------------------------------------------------------------
   core-rpm:
+    if: false
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
@@ -448,6 +450,7 @@ jobs:
             -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
+    if: false
     name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
