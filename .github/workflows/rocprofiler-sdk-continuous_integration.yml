@@ -182,6 +182,11 @@ jobs:
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
           python3 -m pip install -U --user -r requirements.txt
           python3 -m pip install -U --user cmake==3.24.0
+          cat /sys/module/amdgpu/version
+          ls -la /dev/kfd
+          rocminfo | grep -E "Agent|Name"
+          rocm-smi
+          
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
