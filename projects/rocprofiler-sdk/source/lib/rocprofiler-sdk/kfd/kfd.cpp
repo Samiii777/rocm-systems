@@ -1608,10 +1608,6 @@ poll_events(small_vector<pollfd> file_handles, std::shared_ptr<poll_control_stat
             control_state->sync_cv.notify_all();
             sync_requested = false;
         }
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
         if(shutdown_requested && !processed_gpu_events)
         {
             for(const auto& f : file_handles)
