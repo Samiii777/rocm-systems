@@ -233,7 +233,6 @@ jobs:
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             ${{ env.GLOBAL_CMAKE_OPTIONS }} \
             -- \
-            --parallel 4 \
             -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
             -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" \
             -R rocprofv3-test-kfd-xnack -VV
