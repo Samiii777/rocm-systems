@@ -485,7 +485,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemPrefetchBatchAsync = 460,
   HIP_API_ID_hipOccupancyMaxActiveClusters = 461,
   HIP_API_ID_hipOccupancyMaxPotentialClusterSize = 462,
-  HIP_API_ID_LAST = 462,
+  HIP_API_ID_hipExtGraphExecDump = 463,
+  HIP_API_ID_LAST = 463,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -611,6 +612,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipExtEnableLogging: return "hipExtEnableLogging";
     case HIP_API_ID_hipExtGetLastError: return "hipExtGetLastError";
     case HIP_API_ID_hipExtGetLinkTypeAndHopCount: return "hipExtGetLinkTypeAndHopCount";
+    case HIP_API_ID_hipExtGraphExecDump: return "hipExtGraphExecDump";
     case HIP_API_ID_hipExtLaunchKernel: return "hipExtLaunchKernel";
     case HIP_API_ID_hipExtLaunchMultiKernelMultiDevice: return "hipExtLaunchMultiKernelMultiDevice";
     case HIP_API_ID_hipExtMallocWithFlags: return "hipExtMallocWithFlags";
@@ -1067,6 +1069,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipExtEnableLogging", name) == 0) return HIP_API_ID_hipExtEnableLogging;
   if (strcmp("hipExtGetLastError", name) == 0) return HIP_API_ID_hipExtGetLastError;
   if (strcmp("hipExtGetLinkTypeAndHopCount", name) == 0) return HIP_API_ID_hipExtGetLinkTypeAndHopCount;
+  if (strcmp("hipExtGraphExecDump", name) == 0) return HIP_API_ID_hipExtGraphExecDump;
   if (strcmp("hipExtLaunchKernel", name) == 0) return HIP_API_ID_hipExtLaunchKernel;
   if (strcmp("hipExtLaunchMultiKernelMultiDevice", name) == 0) return HIP_API_ID_hipExtLaunchMultiKernelMultiDevice;
   if (strcmp("hipExtMallocWithFlags", name) == 0) return HIP_API_ID_hipExtMallocWithFlags;
@@ -1850,6 +1853,12 @@ typedef struct hip_api_data_s {
       unsigned int* hopcount;
       unsigned int hopcount__val;
     } hipExtGetLinkTypeAndHopCount;
+    struct {
+      hipGraphExec_t graphExec;
+      const char* path;
+      char path__val;
+      unsigned int flags;
+    } hipExtGraphExecDump;
     struct {
       const void* function_address;
       dim3 numBlocks;
@@ -4611,6 +4620,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipExtGetLinkTypeAndHopCount.linktype = (unsigned int*)linktype; \
   cb_data.args.hipExtGetLinkTypeAndHopCount.hopcount = (unsigned int*)hopcount; \
 };
+// hipExtGraphExecDump[('hipGraphExec_t', 'graphExec'), ('const char*', 'path'), ('unsigned int', 'flags')]
+#define INIT_hipExtGraphExecDump_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExtGraphExecDump.graphExec = (hipGraphExec_t)graphExec; \
+  cb_data.args.hipExtGraphExecDump.path = (path) ? strdup(path) : NULL; \
+  cb_data.args.hipExtGraphExecDump.flags = (unsigned int)flags; \
+};
 // hipExtLaunchKernel[('const void*', 'function_address'), ('dim3', 'numBlocks'), ('dim3', 'dimBlocks'), ('void**', 'args'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'stream'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent'), ('int', 'flags')]
 #define INIT_hipExtLaunchKernel_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipExtLaunchKernel.function_address = (const void*)hostFunction; \
@@ -7322,6 +7337,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipExtGetLinkTypeAndHopCount.linktype) data->args.hipExtGetLinkTypeAndHopCount.linktype__val = *(data->args.hipExtGetLinkTypeAndHopCount.linktype);
       if (data->args.hipExtGetLinkTypeAndHopCount.hopcount) data->args.hipExtGetLinkTypeAndHopCount.hopcount__val = *(data->args.hipExtGetLinkTypeAndHopCount.hopcount);
       break;
+// hipExtGraphExecDump[('hipGraphExec_t', 'graphExec'), ('const char*', 'path'), ('unsigned int', 'flags')]
+    case HIP_API_ID_hipExtGraphExecDump:
+      if (data->args.hipExtGraphExecDump.path) data->args.hipExtGraphExecDump.path__val = *(data->args.hipExtGraphExecDump.path);
+      break;
 // hipExtLaunchKernel[('const void*', 'function_address'), ('dim3', 'numBlocks'), ('dim3', 'dimBlocks'), ('void**', 'args'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'stream'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent'), ('int', 'flags')]
     case HIP_API_ID_hipExtLaunchKernel:
       if (data->args.hipExtLaunchKernel.args) data->args.hipExtLaunchKernel.args__val = *(data->args.hipExtLaunchKernel.args);
@@ -9377,6 +9396,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", linktype="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGetLinkTypeAndHopCount.linktype__val); }
       if (data->args.hipExtGetLinkTypeAndHopCount.hopcount == NULL) oss << ", hopcount=NULL";
       else { oss << ", hopcount="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGetLinkTypeAndHopCount.hopcount__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExtGraphExecDump:
+      oss << "hipExtGraphExecDump(";
+      oss << "graphExec="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDump.graphExec);
+      if (data->args.hipExtGraphExecDump.path == NULL) oss << ", path=NULL";
+      else { oss << ", path="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDump.path__val); }
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDump.flags);
       oss << ")";
     break;
     case HIP_API_ID_hipExtLaunchKernel:

@@ -500,6 +500,7 @@ global:
     hipLaunchHostFunc_spt;
     hipRegisterTracerCallback;
     hipGraphDebugDotPrint;
+    hipExtGraphExecDump;
     hipGraphKernelNodeCopyAttributes;
     hipGraphNodeGetEnabled;
     hipGraphNodeSetEnabled;

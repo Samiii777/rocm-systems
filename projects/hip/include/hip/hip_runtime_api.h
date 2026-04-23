@@ -9221,6 +9221,40 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object,
 hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags);
 
 /**
+ * @brief Flags for hipExtGraphExecDump content control.
+ */
+typedef enum hipExtGraphExecDumpFlags {
+    hipExtGraphExecDumpFlagsNone        = 0x0,  ///< Dump node types and IDs only
+    hipExtGraphExecDumpFlagsCodeObjects = 0x1,  ///< Include code object ELF binaries
+    hipExtGraphExecDumpFlagsKernelArgs  = 0x2,  ///< Include kernel argument values
+    hipExtGraphExecDumpFlagsDeps        = 0x4,  ///< Include node dependency edges
+    hipExtGraphExecDumpFlagsDispatch    = 0x8,  ///< Include dispatch dimensions
+    hipExtGraphExecDumpFlagsAll         = 0xF   ///< Include everything
+} hipExtGraphExecDumpFlags;
+
+/**
+ * @brief Dumps a hipGraphExec to a directory containing executable representation.
+ *
+ * This extension API serializes a graph execution object to a directory, capturing:
+ * - Code objects (kernel ELF binaries), deduplicated by content hash
+ * - Kernel arguments: pass-by-value arguments with actual values,
+ *   pointer arguments marked as "PTR"
+ * - Dispatch dimensions (gridDim, blockDim, sharedMemBytes)
+ * - Node dependency graph (parent/child relationships)
+ *
+ * The output directory contains:
+ * - graph_exec.json: Human-readable JSON with all metadata
+ * - codeobjects/: Subdirectory with deduplicated ELF binaries
+ *
+ * @param [in] graphExec  The graph execution object to dump.
+ * @param [in] path       Path to the output directory (created if it doesn't exist).
+ * @param [in] flags      Bitmask of hipExtGraphExecDumpFlags controlling what to include.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorOperatingSystem
+ */
+hipError_t hipExtGraphExecDump(hipGraphExec_t graphExec, const char* path, unsigned int flags);
+
+/**
  * @brief Copies attributes from source node to destination node.
  *
  * Copies attributes from source node to destination node.
