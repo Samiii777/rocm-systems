@@ -19,8 +19,8 @@ endif()
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(kfd-xnack-on-env "${PRELOAD_ENV};HSA_XNACK=1")
-set(kfd-xnack-off-env "${PRELOAD_ENV};HSA_XNACK=0")
+set(kfd-xnack-on-env "${PRELOAD_ENV};HSA_XNACK=1;TRANSPOSE_USE_MANAGED_MEMORY=1")
+set(kfd-xnack-off-env "${PRELOAD_ENV};HSA_XNACK=0;TRANSPOSE_USE_MANAGED_MEMORY=1")
 
 foreach(_XNACK on off)
     rocprofiler_add_integration_execute_test(
@@ -28,7 +28,7 @@ foreach(_XNACK on off)
         COMMAND
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kfd-trace -d
             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace -o out --output-format
-            json --log-level env -- $<TARGET_FILE:transpose>
+            json --log-level env -- $<TARGET_FILE:transpose> 1 1 1 512 512
         DEPENDS transpose
         TIMEOUT 45
         LABELS "integration-tests;multi-gpu"
