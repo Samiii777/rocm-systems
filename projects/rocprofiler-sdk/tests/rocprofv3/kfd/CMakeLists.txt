@@ -28,7 +28,7 @@ foreach(_XNACK on off)
         COMMAND
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kfd-trace -d
             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace -o out --output-format
-            json --log-level env -- $<TARGET_FILE:transpose> 1 1 1 512 512
+            json --log-level ${LOG_LEVEL} -- $<TARGET_FILE:transpose> 1 1 1 512 512
         DEPENDS transpose
         TIMEOUT 45
         LABELS "integration-tests;multi-gpu"

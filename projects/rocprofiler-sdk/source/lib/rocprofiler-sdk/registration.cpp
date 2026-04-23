@@ -780,6 +780,8 @@ invoke_client_detaches()
     {
         if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_detach)
         {
+            ROCP_INFO << "Synchronizing KFD tracing before detaching client contexts for client "
+                      << itr->name;
             kfd::sync();
             context::stop_client_contexts(itr->internal_client_id);
 
@@ -818,6 +820,8 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
         if(itr && itr->internal_client_id.handle == client_id.handle &&
            itr->mutable_client_id.handle == client_id.handle)
         {
+            ROCP_INFO << "Synchronizing KFD tracing before finalizing client contexts for client "
+                      << itr->name;
             kfd::sync();
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)

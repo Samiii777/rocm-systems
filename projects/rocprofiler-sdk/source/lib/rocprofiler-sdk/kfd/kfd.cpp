@@ -799,6 +799,13 @@ get_contexts(rocprofiler_buffer_tracing_kind_t event_kind)
         }
     }
 
+    ROCP_INFO << fmt::format("KFD context lookup for kind {} resolved {} matching context(s) "
+                             "from {} active KFD context(s); range kind={}",
+                             static_cast<int>(event_kind),
+                             operation_ctxs.size(),
+                             active_contexts.size(),
+                             static_cast<int>(range_kind));
+
     return operation_ctxs;
 }
 
@@ -946,6 +953,9 @@ struct poll_kfd_t
             }
         }
 
+        ROCP_INFO << fmt::format(
+            "KFD poll thread configured with {} GPU event fd(s)", file_handles.size() - 2);
+
         // Enable KFD masked events by writing flags to kfd fd
         for(size_t i = 2; i < file_handles.size(); ++i)
         {
@@ -991,13 +1001,20 @@ struct poll_kfd_t
 
     void sync()
     {
-        if(!active) return;
+        if(!active)
+        {
+            ROCP_INFO << "Skipping KFD background thread sync request because KFD polling is not active";
+            return;
+        }
 
         uint64_t sync_request_id = 0;
         {
             auto _lk = std::unique_lock<std::mutex>{control_state->sync_mutex};
             sync_request_id = ++control_state->sync_request_count;
         }
+
+        ROCP_INFO << fmt::format("Requesting KFD background thread sync (request={})",
+                                 sync_request_id);
 
         auto bytes_written{-1};
         do
@@ -1014,6 +1031,8 @@ struct poll_kfd_t
         auto _lk = std::unique_lock<std::mutex>{control_state->sync_mutex};
         control_state->sync_cv.wait(
             _lk, [&]() { return control_state->sync_completed_count >= sync_request_id; });
+        ROCP_INFO << fmt::format("Completed KFD background thread sync (request={})",
+                                 sync_request_id);
     }
 
     node_fd_t get_node_fd(int gpu_node_id) const
@@ -1495,12 +1514,22 @@ handle_reporting(std::string_view event_data)
 
     auto buffered_contexts = get_contexts(event.kind);
 
-    // loop will handle if array empty
-    ROCP_TRACE << fmt::format(
-        "KFD event {} (operation={}) has {} contexts based on the domain filtering",
-        static_cast<int>(event.kind),
-        event.operation,
-        buffered_contexts.size());
+    if(buffered_contexts.empty())
+    {
+        ROCP_INFO << fmt::format("KFD event kind {} ({}) operation {} matched no buffered "
+                                 "contexts; event will not contribute output",
+                                 static_cast<int>(event.kind),
+                                 name_by_id(event.kind, event.operation),
+                                 event.operation);
+        return;
+    }
+
+    ROCP_INFO << fmt::format("KFD event kind {} ({}) operation {} matched {} buffered "
+                             "context(s)",
+                             static_cast<int>(event.kind),
+                             name_by_id(event.kind, event.operation),
+                             event.operation,
+                             buffered_contexts.size());
 
     for(const auto& itr : buffered_contexts)
     {
@@ -1570,9 +1599,15 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
             if(read_ret == 1)
             {
                 if(control_signal == 'E')
+                {
+                    ROCP_INFO << "KFD background thread received shutdown control signal";
                     shutdown_requested = true;
+                }
                 else if(control_signal == 'S')
+                {
+                    ROCP_INFO << "KFD background thread received sync control signal";
                     sync_requested = true;
+                }
                 else
                     ROCP_CI_LOG(WARNING)
                         << "Unknown KFD background thread control signal: " << control_signal;
@@ -1593,6 +1628,10 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
             {
                 processed_gpu_events = true;
                 size_t status_size   = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
+                ROCP_INFO << fmt::format(
+                    "KFD background thread read {} byte(s) from GPU event fd {}",
+                    status_size,
+                    fd.fd);
                 auto   event_strings = std::string_view{scratch_buffer.data(), status_size};
                 kfd_readlines(event_strings, handle_reporting);
             }
@@ -1606,6 +1645,7 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
                 control_state->sync_completed_count = control_state->sync_request_count;
             }
             control_state->sync_cv.notify_all();
+            ROCP_INFO << "KFD background thread completed sync drain with no additional GPU events";
             sync_requested = false;
         }
         if(shutdown_requested && !processed_gpu_events)
@@ -1614,6 +1654,7 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
             {
                 close(f.fd);
             }
+            ROCP_INFO << "KFD background thread drained pending events and is exiting";
             ROCP_INFO << "Terminating background thread\n";
             return;
         }
@@ -1656,9 +1697,21 @@ rocprofiler_status_t init(std::index_sequence<Inxs...>)
     auto ver = kfd::get_version();
     if(ver.major_version * 1000 + ver.minor_version > 1011)
     {
-        if(!context::get_registered_contexts(context_filter).empty())
+        auto registered_contexts = context::get_registered_contexts(context_filter);
+        ROCP_INFO << fmt::format("KFD tracing init found {} registered context(s) requesting KFD "
+                                 "tracing",
+                                 registered_contexts.size());
+
+        if(!registered_contexts.empty())
         {
             config::init(event_ids);
+            ROCP_INFO << fmt::format("KFD tracing initialized with {} event id(s)",
+                                     event_ids.size());
+        }
+        else
+        {
+            ROCP_INFO << "Skipping KFD tracing initialization because no registered contexts "
+                         "requested KFD tracing";
         }
         return ROCPROFILER_STATUS_SUCCESS;
     }
@@ -1751,12 +1804,14 @@ init()
 void
 finalize()
 {
+    ROCP_INFO << "Finalizing KFD tracing";
     config::reset();
 }
 
 void
 sync()
 {
+    ROCP_INFO << "Synchronizing KFD tracing";
     config::sync();
 }
 
