@@ -1690,7 +1690,7 @@ static void system_wait(int milli_seconds) {
   ss << __PRETTY_FUNCTION__ << " | "
      << "** Waiting for " << std::dec << waitTime << " us (" << waitTime / 1000 << " seconds) **";
   LOG_DEBUG(ss);
-  usleep(waitTime);
+  usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   ss << __PRETTY_FUNCTION__ << " | "
@@ -1763,7 +1763,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
   const auto p1 = std::chrono::system_clock::now();
   auto current_time =
       std::chrono::duration_cast<std::chrono::microseconds>(p1.time_since_epoch()).count();
-  violation_status->reference_timestamp = current_time;
+  violation_status->reference_timestamp = static_cast<uint64_t>(current_time);
 
   amd::smi::AMDSmiProcessor* device = nullptr;
   amdsmi_status_t ret =
@@ -3986,7 +3986,7 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
       rsmi_wrapper(rsmi_dev_power_cap_get, processor_handle, 0, sensor_ind, &(info->power_cap));
 
   status = smi_amdgpu_get_ranges(gpudevice, AMDSMI_CLK_TYPE_GFX, NULL, NULL, &dpm, NULL);
-  info->dpm_cap = dpm;
+  info->dpm_cap = static_cast<uint64_t>(dpm);
 
   // Get other information from rocm-smi
   status = rsmi_wrapper(rsmi_dev_power_cap_default_get, processor_handle, 0, sensor_ind,
@@ -4889,8 +4889,8 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  info->max_clk = max_freq;
-  info->min_clk = min_freq;
+  info->max_clk = static_cast<uint32_t>(max_freq);
+  info->min_clk = static_cast<uint32_t>(min_freq);
   info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
 
   switch (clk_type) {
@@ -5139,7 +5139,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
   uint32_t i = 0;
   for (int afid : cper_decode(cper)) {
     if (i < *num_afids) {
-      afids[i] = afid;
+      afids[i] = static_cast<uint64_t>(afid);
     }
     ++i;
   }
@@ -5250,7 +5250,7 @@ amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,
   // default the sensor_ind here to 0
   amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, 0, &power_limit);
   if (status2 == AMDSMI_STATUS_SUCCESS) {
-    info->power_limit = power_limit;
+    info->power_limit = static_cast<uint32_t>(power_limit);
   } else if (status2 == AMDSMI_STATUS_NOT_SUPPORTED) {
     status = AMDSMI_STATUS_SUCCESS;
   }
