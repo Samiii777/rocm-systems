@@ -185,7 +185,7 @@ void TestPciReadWrite::Run(void) {
       amdsmi_status_code_to_string(ret, &status_string);
       std::cout << "\t\t** amdsmi_set_gpu_pci_bandwidth(): " << status_string << "\n";
       // The library returns NOT_SUPPORTED before changing perf level on
-      // hardware that rejects the sysfs write (e.g. EROFS), so no restore
+      // hardware that rejects the sysfs write, so no restore
       // is needed. Attempting a restore here would itself fail with the
       // same errno on such hardware.
       continue;
