@@ -1477,8 +1477,11 @@ poll_events(small_vector<pollfd> file_handles)
 {
     // storage to write records to, 1MB
     constexpr size_t PREALLOCATE_ELEMENT_COUNT{1024 * 128};
+    // Give KFD a short grace period to deliver teardown-triggered events after shutdown starts.
+    constexpr int    SHUTDOWN_DRAIN_TIMEOUT_MS = 50;
     std::string      scratch_buffer(PREALLOCATE_ELEMENT_COUNT, '\0');
     auto&            exitfd = file_handles[1];
+    bool             shutdown_requested = false;
 
     // Wait or spin on events.
     //  0 -> return immediately even if no events
@@ -1494,7 +1497,9 @@ poll_events(small_vector<pollfd> file_handles)
 
     while(true)
     {
-        auto poll_ret = poll(file_handles.data(), file_handles.size(), -1);
+        auto poll_ret = poll(file_handles.data(),
+                             file_handles.size(),
+                             (shutdown_requested) ? SHUTDOWN_DRAIN_TIMEOUT_MS : -1);
 
         if(poll_ret == -1)
         {
@@ -1505,15 +1510,22 @@ poll_events(small_vector<pollfd> file_handles)
 
         if((exitfd.revents & POLLIN) != 0)
         {
-            for(const auto& f : file_handles)
+            // Consume the shutdown notification so subsequent polls can wait briefly for any
+            // teardown-triggered KFD events that have not been published yet.
+            char    shutdown_signal = '\0';
+            ssize_t read_ret        = -1;
+            do
             {
-                close(f.fd);
-            }
-            ROCP_INFO << "Terminating background thread\n";
-            return;
+                read_ret = read(exitfd.fd, &shutdown_signal, 1);
+            } while(read_ret == -1 && errno == EINTR);
+
+            ROCP_CI_LOG_IF(WARNING, read_ret != 1)
+                << "Failed to consume KFD background thread shutdown signal";
+            shutdown_requested = true;
+            exitfd.revents     = 0;
         }
 
-        using namespace std::chrono_literals;
+        bool processed_gpu_events = false;
 
         // 0 and 1 are for generic and pipe-notify handles
         for(size_t i = 2; i < file_handles.size(); ++i)
@@ -1523,11 +1535,22 @@ poll_events(small_vector<pollfd> file_handles)
             // We have data to read, perhaps multiple events
             if((fd.revents & POLLIN) != 0)
             {
+                processed_gpu_events = true;
                 size_t status_size   = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
                 auto   event_strings = std::string_view{scratch_buffer.data(), status_size};
                 kfd_readlines(event_strings, handle_reporting);
             }
             fd.revents = 0;
+        }
+
+        if(shutdown_requested && !processed_gpu_events)
+        {
+            for(const auto& f : file_handles)
+            {
+                close(f.fd);
+            }
+            ROCP_INFO << "Terminating background thread\n";
+            return;
         }
     }
 }
