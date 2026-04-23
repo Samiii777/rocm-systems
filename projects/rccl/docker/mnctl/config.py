@@ -88,6 +88,7 @@ class Config(object):
         self.host_ssh_port = int(os.environ.get("MNCTL_HOST_SSH_PORT", "22"))
         self.verbose = bool(os.environ.get("MNCTL_VERBOSE", ""))
         self.force_rebuild = False
+        self.force_replace = False
         self.dry_run = False
         self.extra_volumes = []  # type: List[str]
         self.dockerfile = os.environ.get(
@@ -109,6 +110,12 @@ class Config(object):
 
         # NIC type: "mellanox", "ainic", or any custom string
         self.nic_type = os.environ.get("MNCTL_NIC_TYPE", "mellanox")
+
+        # GPU architecture targets (e.g. "gfx942", "gfx950")
+        self.gpu_targets = (
+            os.environ.get("MNCTL_GPU_TARGETS", "")
+            or os.environ.get("GPU_TARGETS", "")
+        )
 
         # Resolved from the Dockerfile's ARG CONTAINER_USER (set by __main__)
         self.container_user = "ubuntu"

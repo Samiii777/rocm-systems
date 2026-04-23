@@ -302,6 +302,8 @@ def _build_forward_args(cfg, action="--run"):
         args += ["--dockerfile", cfg.dockerfile]
     if cfg.force_rebuild:
         args.append("--rebuild")
+    elif cfg.force_replace:
+        args.append("--replace")
     if cfg.verbose:
         args.append("--verbose")
     if cfg.post_setup_dir:
@@ -314,6 +316,8 @@ def _build_forward_args(cfg, action="--run"):
         args += ["--volume", vol]
     if cfg.nic_type != "mellanox":
         args += ["--nic-type", cfg.nic_type]
+    if cfg.gpu_targets:
+        args += ["--gpu-targets", cfg.gpu_targets]
     # --runtime before positional to avoid nargs='?' ambiguity with --ssh
     args += ["--runtime", cfg.runtime_name]
     args.append(cfg.rocm_image)
@@ -357,8 +361,17 @@ def launch_all(cfg):
 
         # Build compound command: setup-deps (idempotent) then run.
         # python3 -u disables output buffering so lines stream in real time.
+        # --setup-deps gets --rebuild (image build happens here).
+        # --run gets --replace instead of --rebuild so it reuses the image
+        # that --setup-deps just built, avoiding a redundant full rebuild.
         deps_args = _build_forward_args(cfg, action="--setup-deps")
+
+        saved_rebuild = cfg.force_rebuild
+        if cfg.force_rebuild:
+            cfg.force_rebuild = False
+            cfg.force_replace = True
         run_args = _build_forward_args(cfg, action="--run")
+        cfg.force_rebuild = saved_rebuild
 
         def _quote_cmd(args):
             # type: (List[str]) -> str

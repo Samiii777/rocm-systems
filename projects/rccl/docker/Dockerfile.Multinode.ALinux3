@@ -23,6 +23,7 @@ ARG CONTAINER_USER=alinux
 ARG ROCM_SYSTEMS_REPO=https://github.com/ROCm/rocm-systems.git
 ARG ROCM_SYSTEMS_BRANCH=develop
 ARG GPU_TARGETS=gfx950
+ENV GPU_TARGETS=${GPU_TARGETS}
 
 ENV ROCM_PATH=/opt/rocm
 ENV SSH_PORT=${SSH_PORT}
@@ -165,7 +166,7 @@ RUN cd rocm-systems/projects/rccl \
 
 # ---------------------------------------------------------------------------
 # RCCL-Tests: source is checked out above; built at container startup
-# once /opt/shared/ompi is available (see build_rccl_tests.sh)
+# once /opt/shared/ompi is available (see post-setup/setup.sh)
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

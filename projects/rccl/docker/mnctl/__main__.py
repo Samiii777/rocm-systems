@@ -47,7 +47,9 @@ Environment Variables (override defaults without flags):
   MNCTL_SSH_PORT, MNCTL_SHM_SIZE, MNCTL_SHARED_DIR,
   MNCTL_BUILDS_DIR, MNCTL_SSH_KEY_DIR, MNCTL_SSH_KEY,
   MNCTL_HOSTFILE, MNCTL_HOST_SSH_PORT, MNCTL_POST_SETUP_DIR,
-  MNCTL_DOCKERFILE, MNCTL_NIC_TYPE, MNCTL_VERBOSE
+  MNCTL_DOCKERFILE, MNCTL_NIC_TYPE, MNCTL_GPU_TARGETS, MNCTL_VERBOSE
+
+  GPU_TARGETS is also accepted as a fallback for MNCTL_GPU_TARGETS.
 
 Path expansion:
   All path options support ~ and $VAR / ${VAR} expansion.
@@ -126,6 +128,15 @@ Path expansion:
         ),
     )
     parser.add_argument(
+        "--gpu-targets", dest="gpu_targets",
+        help=(
+            "GPU architecture targets, e.g. gfx942 or gfx950 "
+            "(default: MNCTL_GPU_TARGETS or GPU_TARGETS env). "
+            "Passed as --build-arg to the Dockerfile and as an "
+            "env var to containers for rccl-tests builds."
+        ),
+    )
+    parser.add_argument(
         "--runtime", dest="runtime_name",
         choices=["docker"],
         help="Container runtime (default: docker)",
@@ -137,6 +148,10 @@ Path expansion:
     parser.add_argument(
         "--rebuild", action="store_true",
         help="Force image rebuild and replace existing containers",
+    )
+    parser.add_argument(
+        "--replace", action="store_true",
+        help="Replace existing containers without rebuilding the image",
     )
     parser.add_argument(
         "--verbose", action="store_true",
@@ -183,12 +198,17 @@ def _apply_cli_args(cfg, args):
         cfg.dockerfile = args.dockerfile
     if args.nic_type is not None:
         cfg.nic_type = args.nic_type
+    if args.gpu_targets is not None:
+        cfg.gpu_targets = args.gpu_targets
     if args.runtime_name is not None:
         cfg.runtime_name = args.runtime_name
     if args.dry_run:
         cfg.dry_run = True
     if args.rebuild:
         cfg.force_rebuild = True
+        cfg.force_replace = True
+    if args.replace:
+        cfg.force_replace = True
     if args.verbose:
         cfg.verbose = True
 
@@ -263,7 +283,9 @@ def _dump_config(cfg):
     log_verbose("host_ssh_port={}".format(cfg.host_ssh_port))
     log_verbose("dockerfile={}".format(cfg.dockerfile))
     log_verbose("force_rebuild={}".format(cfg.force_rebuild))
+    log_verbose("force_replace={}".format(cfg.force_replace))
     log_verbose("nic_type={}".format(cfg.nic_type))
+    log_verbose("gpu_targets={}".format(cfg.gpu_targets or "(dockerfile default)"))
     log_verbose("runtime={}".format(cfg.runtime_name))
     log_verbose("extra_volumes={}".format(cfg.extra_volumes))
     import platform

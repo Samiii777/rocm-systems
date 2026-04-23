@@ -163,6 +163,12 @@ class DockerRuntime(ContainerRuntime):
                     "ROCM_IMAGE={}".format(self.cfg.rocm_image),
                 ]
 
+            if self.cfg.gpu_targets:
+                cmd += [
+                    "--build-arg",
+                    "GPU_TARGETS={}".format(self.cfg.gpu_targets),
+                ]
+
             if self.cfg.verbose:
                 cmd.append("--progress=plain")
                 log_verbose(
@@ -221,10 +227,11 @@ class DockerRuntime(ContainerRuntime):
                 "--format", "{{.State.Status}}",
             ])
 
-            if cfg.force_rebuild:
+            if cfg.force_rebuild or cfg.force_replace:
                 log(
-                    "=== Replacing container '{}' (--rebuild) ===".format(
-                        cfg.container_name
+                    "=== Replacing container '{}' ({}) ===".format(
+                        cfg.container_name,
+                        "--rebuild" if cfg.force_rebuild else "--replace",
                     )
                 )
                 self._remove_container()
@@ -445,7 +452,10 @@ class DockerRuntime(ContainerRuntime):
 
         args += ["-e", "NIC_TYPE={}".format(cfg.nic_type)]
 
-        if cfg.force_rebuild:
+        if cfg.gpu_targets:
+            args += ["-e", "GPU_TARGETS={}".format(cfg.gpu_targets)]
+
+        if cfg.force_rebuild or cfg.force_replace:
             args += ["-e", "FORCE_POST_SETUP=1"]
 
         if os.path.exists("/dev/kfd"):
