@@ -35,21 +35,65 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
     extern void __ockl_dm_init_v1(ulong, ulong, uint, uint);
 
     extern void __amd_fillBufferUnAligned(
-        __global void* __restrict buf, __constant uchar* __restrict pattern, int body_pattern,
+        __global void* __restrict buf, __constant uchar* __restrict pattern, ulong2 body_pattern,
         ulong2 body_tile_pattern, ulong body_tile_count, ulong body_tile_passes, ulong stride,
         ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
         __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
-        __global ulong2* __restrict element_tiled, ushort4 counts, int isAligned);
+        __global ulong2* __restrict element_tiled, ushort4 counts, uint body_elem_size,
+        int isAligned);
 
     __kernel void __amd_rocclr_fillBufferUnAligned(
-        __global void* __restrict buf, __constant uchar* __restrict pattern, int body_pattern,
+        __global void* __restrict buf, __constant uchar* __restrict pattern, ulong2 body_pattern,
         ulong2 body_tile_pattern, ulong body_tile_count, ulong body_tile_passes, ulong stride,
         ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
         __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
-        __global ulong2* __restrict element_tiled, ushort4 counts, int isAligned) {
-      __amd_fillBufferUnAligned(buf, pattern, body_pattern, body_tile_pattern, body_tile_count,
-                                body_tile_passes, stride, pattern_size, tail_offset, body_ptr,
-                                body_tail_ptr, tail_ptr, element_tiled, counts, isAligned);
+        __global ulong2* __restrict element_tiled, ushort4 counts, uint body_elem_size,
+        int isAligned) {
+      ulong id = get_global_id(0);
+
+      // Handle head, body and tail in the first warp only.
+      // Combined cleanup work is constrained to fit in 32 lanes.
+      // Skip when buffer is 16-byte aligned (no head/body/body_tail/tail regions).
+      if (!isAligned && id < 32) {
+        __global uchar* head_ptr = (__global uchar*)buf;
+        const uint lane = (uint)id;
+        const uint head_end = (uint)counts.s0;
+        const uint body_end = head_end + (uint)counts.s1;
+        const uint body_tail_end = body_end + (uint)counts.s2;
+        const uint tail_end = body_tail_end + (uint)counts.s3;
+
+        if (lane < head_end) {
+          head_ptr[lane] = pattern[lane & (pattern_size - 1)];
+        } else if (lane < body_end) {
+          const uint body_idx = lane - head_end;
+          if (body_elem_size == 16) {
+            ((__global ulong2*)body_ptr)[body_idx] = body_pattern;
+          } else if (body_elem_size == 8) {
+            ((__global ulong*)body_ptr)[body_idx] = body_pattern.x;
+          } else {
+            ((__global uint*)body_ptr)[body_idx] = (uint)body_pattern.x;
+          }
+        } else if (lane < body_tail_end) {
+          const uint body_tail_idx = lane - body_end;
+          if (body_elem_size == 16) {
+            ((__global ulong2*)body_tail_ptr)[body_tail_idx] = body_pattern;
+          } else if (body_elem_size == 8) {
+            ((__global ulong*)body_tail_ptr)[body_tail_idx] = body_pattern.x;
+          } else {
+            ((__global uint*)body_tail_ptr)[body_tail_idx] = (uint)body_pattern.x;
+          }
+        } else if (lane < tail_end) {
+          const ulong tail_byte_idx = (ulong)(lane - body_tail_end);
+          tail_ptr[tail_byte_idx] =
+              pattern[(tail_offset + tail_byte_idx) & (pattern_size - 1)];
+        }
+      }
+
+      // We pass in the number of passes from the CPU to get the best code-gen
+      // We use the number of passes and the size to get correct behiaviour
+      for (ulong j = 0; (j < body_tile_passes) && (j * stride + id < body_tile_count); ++j) {
+        element_tiled[j * stride + id] = body_tile_pattern;
+      }
     }
 
     __kernel void __amd_rocclr_fillBufferAligned2D(

@@ -2345,29 +2345,39 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
   }
 }
 
-// Helper to tile 1- and 2-byte patterns into a 32-bit value.
-// This is used by the unaligned fill path to operate on 32-bit chunks
-// even when the original pattern is smaller than 4 bytes.
-static inline uint32_t tilePatternToUint32(const void* pattern, size_t patternSize) {
-  const auto* bytes = static_cast<const unsigned char*>(pattern);
+struct alignas(16) FillPatternPayload {
+  uint64_t lo;
+  uint64_t hi;
+};
 
-  if (patternSize == sizeof(uint8_t)) {
-    const uint32_t v = static_cast<uint32_t>(bytes[0]);
-    return (v | (v << 8) | (v << 16) | (v << 24));
+static inline void tilePatternBytes(unsigned char* dst, size_t dstSize, const void* pattern,
+                                    size_t patternSize) {
+  const auto* src = static_cast<const unsigned char*>(pattern);
+  for (size_t i = 0; i < dstSize; ++i) {
+    dst[i] = src[i & (patternSize - 1)];
   }
+}
 
-  if (patternSize == sizeof(uint16_t)) {
-    const uint32_t lo = static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8);
-    return (lo | (lo << 16));
+static inline uint32_t getBodyElementSize(size_t patternSize) {
+  if (patternSize <= sizeof(uint32_t)) {
+    return sizeof(uint32_t);
+  } else if (patternSize <= sizeof(uint64_t)) {
+    return sizeof(uint64_t);
   }
+  return 2 * sizeof(uint64_t);
+}
 
-  if (patternSize == sizeof(uint32_t)) {
-    assert((reinterpret_cast<uintptr_t>(pattern) % alignof(uint32_t)) == 0 &&
-           "tilePatternToUint32 expects uint32_t-aligned pattern");
-    return *static_cast<const uint32_t*>(pattern);
-  }
-  assert(false && "tilePatternToUint32 only supports 1- and 2-byte patterns");
-  return 0;
+static inline FillPatternPayload buildBodyPattern(const void* pattern, size_t patternSize,
+                                                  uint32_t bodyElemSize) {
+  FillPatternPayload payload = {};
+  tilePatternBytes(reinterpret_cast<unsigned char*>(&payload), bodyElemSize, pattern, patternSize);
+  return payload;
+}
+
+static inline FillPatternPayload buildTilePattern(const void* pattern, size_t patternSize) {
+  FillPatternPayload payload = {};
+  tilePatternBytes(reinterpret_cast<unsigned char*>(&payload), sizeof(payload), pattern, patternSize);
+  return payload;
 }
 
 // ================================================================================================
@@ -2397,59 +2407,50 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
           ? (unsigned char*)gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
           : (unsigned char*)gpu().allocKernArg(kCBSize, kCBAlignment);
 
-  union body {
-    int32_t pattern;
-    unsigned char pattern_elements[4];
-  } body_pattern{};
-
-  // For 1- and 2-byte patterns, tile the pattern to fill a 32-bit value.
-  // For 4-byte patterns, copy the pattern bytes directly.
-  assert(patternSize <= sizeof(uint32_t) && "Don't currently support patterns larger than 32 bits");
-  body_pattern.pattern = static_cast<int32_t>(tilePatternToUint32(pattern, patternSize));
+  assert((patternSize == 1 || patternSize == 2 || patternSize == 4 || patternSize == 8 ||
+          patternSize == 16) &&
+         "fillBuffer1D supports pattern sizes of 1/2/4/8/16 bytes");
+  const uint32_t bodyElemSize = getBodyElementSize(patternSize);
+  const FillPatternPayload body_pattern = buildBodyPattern(pattern, patternSize, bodyElemSize);
 
   // Construct tiled body
-  struct alignas(16) tiled_body {
-    int32_t pattern_elements[4];
-  } tiled_pattern;
-  static_assert(sizeof(tiled_pattern) == 16, "tiled_pattern should be 16 bytes");
-  static_assert(alignof(tiled_pattern) == 16, "tiled_pattern should be 16 bytes");
-  for (size_t j = 0; j < 4; ++j) {
-    tiled_pattern.pattern_elements[j] = body_pattern.pattern;
-  }
+  const FillPatternPayload tiled_pattern = buildTilePattern(pattern, patternSize);
 
   // Calculate head, body, body-tail, tail, and tiled body counts
-  // Head, body, body-tail, and tail counts are in range [0, 3]
+  // Head/tail are byte counts. Body/body-tail are element counts.
   constexpr size_t tile_size = sizeof(ulong) * 2;
   uintptr_t end_addr = fill_buf_addr + size[0];
 
-  uintptr_t four_aligned_start = alignUp(fill_buf_addr, sizeof(int32_t));
-  uintptr_t tile_start = alignUp(fill_buf_addr, tile_size);
-  uintptr_t four_aligned_end = alignDown(end_addr, sizeof(int32_t));
-  uintptr_t tile_end = alignDown(four_aligned_end, tile_size);
+  uintptr_t body_aligned_start = alignUp(fill_buf_addr, static_cast<size_t>(bodyElemSize));
+  uintptr_t tile_start = alignUp(body_aligned_start, tile_size);
+  uintptr_t body_aligned_end = alignDown(end_addr, static_cast<size_t>(bodyElemSize));
+  uintptr_t tile_end = alignDown(body_aligned_end, tile_size);
 
-  const size_t head_count = four_aligned_start - fill_buf_addr;
+  const size_t head_count = body_aligned_start - fill_buf_addr;
   const size_t body_tile_count = (tile_end > tile_start) ? (tile_end - tile_start) / tile_size : 0;
   const size_t body_count =
-      (tile_start > four_aligned_start)
-          ? static_cast<size_t>((tile_start - four_aligned_start) / sizeof(int32_t))
+      (tile_start > body_aligned_start)
+          ? static_cast<size_t>((tile_start - body_aligned_start) / bodyElemSize)
           : static_cast<size_t>(0);
   const size_t body_tail_count =
-      (four_aligned_end > tile_end)
-          ? static_cast<size_t>((four_aligned_end - tile_end) / sizeof(int32_t))
+      (body_aligned_end > tile_end)
+          ? static_cast<size_t>((body_aligned_end - tile_end) / bodyElemSize)
           : static_cast<size_t>(0);
-  const size_t tail_count = static_cast<size_t>(end_addr - four_aligned_end);
+  const size_t tail_count = static_cast<size_t>(end_addr - body_aligned_end);
 
-  assert(head_count < 4 && "head_count should be less than 4");
-  assert(body_count < 4 && "body_count should be less than 4");
-  assert(body_tail_count < 4 && "body_tail_count should be less than 4");
-  assert(tail_count < 4 && "tail_count should be less than 4");
+  assert(head_count < bodyElemSize && "head_count should be less than body element size");
+  assert(body_count <= (tile_size / bodyElemSize) &&
+         "body_count should fit before first 16-byte tile");
+  assert(body_tail_count <= (tile_size / bodyElemSize) &&
+         "body_tail_count should fit after last 16-byte tile");
+  assert(tail_count < bodyElemSize && "tail_count should be less than body element size");
+  assert((head_count + body_count + body_tail_count + tail_count) < 32 &&
+         "first-warp cleanup should fit in 32 lanes");
 
-  const size_t tail_offset = head_count + body_count * sizeof(int32_t) +
-                             body_tile_count * (sizeof(ulong) * 2) +
-                             body_tail_count * sizeof(int32_t);
+  const size_t tail_offset =
+      head_count + body_count * bodyElemSize + body_tile_count * tile_size + body_tail_count * bodyElemSize;
   const size_t body_offset = head_count;
-  const size_t body_tail_offset =
-      head_count + body_count * sizeof(int32_t) + body_tile_count * (sizeof(ulong) * 2);
+  const size_t body_tail_offset = head_count + body_count * bodyElemSize + body_tile_count * tile_size;
   const size_t tile_offset = static_cast<size_t>(tile_start - fill_buf_addr);
   const int isAligned =
       (head_count == 0 && body_count == 0 && body_tail_count == 0 && tail_count == 0) ? 1 : 0;
@@ -2479,7 +2480,8 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   setArgument(kernels_[kFillType], 11, sizeof(cl_mem), &mem, origin[0] + tail_offset);
   setArgument(kernels_[kFillType], 12, sizeof(cl_mem), &mem, origin[0] + tile_offset);
   setArgument(kernels_[kFillType], 13, sizeof(counts), &counts);
-  setArgument(kernels_[kFillType], 14, sizeof(isAligned), &isAligned);
+  setArgument(kernels_[kFillType], 14, sizeof(bodyElemSize), &bodyElemSize);
+  setArgument(kernels_[kFillType], 15, sizeof(isAligned), &isAligned);
 
   size_t globalWorkOffset[3] = {0, 0, 0};
   amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
