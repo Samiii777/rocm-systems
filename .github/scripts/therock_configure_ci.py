@@ -135,6 +135,7 @@ SKIPPABLE_PATH_PATTERNS = [
     "shared/*/docs/*",
     "shared/*/.gitignore",
     "experimental/python/perfxpert/*",
+    ".github/workflows/labeler.yml",
 ]
 
 
