@@ -42,36 +42,6 @@
 
 namespace amd::pal {
 
-namespace {
-template <typename T>
-struct TailAllocation {
-  T* object_ = nullptr;
-  address tail_ = nullptr;
-};
-
-template <typename T, typename... Args>
-TailAllocation<T> AllocateWithTail(size_t tail_size, size_t tail_alignment, Args&&... args) {
-  TailAllocation<T> allocation = {};
-  const size_t min_alignment = std::max(alignof(T), tail_alignment);
-  const size_t object_size = amd::alignUp(sizeof(T), min_alignment);
-  if (object_size < sizeof(T)) {
-    return allocation;
-  }
-  if (tail_size > (std::numeric_limits<size_t>::max() - object_size)) {
-    return allocation;
-  }
-
-  void* storage = ::operator new(object_size + tail_size, std::nothrow);
-  if (storage == nullptr) {
-    return allocation;
-  }
-
-  allocation.object_ = new (storage) T(std::forward<Args>(args)...);
-  allocation.tail_ = reinterpret_cast<address>(storage) + object_size;
-  return allocation;
-}
-}  // namespace
-
 AqlPacketMgmt::AqlPacketMgmt(const Device& dev) {
   memset(aql_vgpus_, 0, sizeof(aql_vgpus_));
 
@@ -192,26 +162,28 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   }
 
   size_t allocSize = qSize + max_command_buffers * (cmdSize + fSize);
-  auto queueAlloc = AllocateWithTail<VirtualGPU::Queue>(
-      allocSize, alignof(std::max_align_t), gpu, palDev, residency_limit, max_command_buffers);
-  VirtualGPU::Queue* queue = queueAlloc.object_;
+  const size_t min_alignment = std::max(alignof(VirtualGPU::Queue), alignof(std::max_align_t));
+  const size_t queue_size = amd::alignUp(sizeof(VirtualGPU::Queue), min_alignment);
+
+  VirtualGPU::Queue* queue = new (allocSize) VirtualGPU::Queue(gpu, palDev, residency_limit, max_command_buffers);
   if (queue != nullptr) {
-    address addrQ = queueAlloc.tail_;
+    address addrQ = reinterpret_cast<address>(queue) + queue_size;
     if (((qCreateInfo.engineType == Pal::EngineTypeCompute) ||
          (qCreateInfo.engineType == Pal::EngineTypeDma)) &&
         (qCreateInfo.priority != Pal::QueuePriority::Realtime)) {
       uint32_t index = AllocedQueues(gpu, qCreateInfo.engineType);
       // Create PAL queue object
       if (index < GPU_MAX_HW_QUEUES) {
-        auto infoAlloc = AllocateWithTail<Device::QueueRecycleInfo>(
-            qSize, alignof(std::max_align_t), gpu.dev());
-        Device::QueueRecycleInfo* info = infoAlloc.object_;
+        const size_t info_min_alignment = std::max(alignof(Device::QueueRecycleInfo), alignof(std::max_align_t));
+        const size_t info_size = amd::alignUp(sizeof(Device::QueueRecycleInfo), info_min_alignment);
+
+        Device::QueueRecycleInfo* info = new (qSize) Device::QueueRecycleInfo(gpu.dev());
         if (info == nullptr) {
           LogError("Could not create QueueRecycleInfo!");
           delete queue;
           return nullptr;
         }
-        addrQ = infoAlloc.tail_;
+        addrQ = reinterpret_cast<address>(info) + info_size;
         qCreateInfo.aqlPacketList = info->DebuggerData();
         result = palDev->CreateQueue(qCreateInfo, addrQ, &queue->iQueue_);
         if (result == Pal::Result::Success) {
