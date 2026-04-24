@@ -75,13 +75,30 @@ jobs:
           done
           echo "ci_images=${JSON}" >> "${GITHUB_OUTPUT}"
 
+  build_AIS_CI_image:
+    needs: AIS_CI_Pre-check
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.AIS_CI_Pre-check.outputs.matrix) }}
+    uses: ./.github/workflows/hipfile-image-build.yml
+    with:
+      ci_image_name: ${{ fromJSON(needs.AIS_CI_Pre-check.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
+      ci_image_cache: ${{ fromJSON(needs.AIS_CI_Pre-check.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_cache }}
+      ci_images: ${{ needs.AIS_CI_Pre-check.outputs.ci_images }}
+      dockerfile_changed: ${{ needs.AIS_CI_Pre-check.outputs.changed_dockerfile == '1' }}
+      platform: ${{ matrix.supported_platforms }}
+      rocm_version: ${{ matrix.rocm_versions }}
+
   hipfile-CI:
-    needs: [AIS_CI_Pre-check]
+    needs: [AIS_CI_Pre-check, build_AIS_CI_image]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.AIS_CI_Pre-check.outputs.matrix) }}
     uses: ./.github/workflows/hipfile-ci.yml
     with:
-      dockerfile_changed: ${{ needs.AIS_CI_Pre-check.outputs.changed_dockerfile == '1' }}
+      ci_image: ${{ fromJSON(needs.build_AIS_CI_image.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
