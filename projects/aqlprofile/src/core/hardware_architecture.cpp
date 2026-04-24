@@ -23,6 +23,9 @@
 #include "core/hardware_architecture.hpp"
 #include "def/gpu_block_info.h"
 
+#include <stdexcept>
+#include <limits>
+
 namespace aql_profile {
 
 size_t HardwareArchitecture::GetNumEventsForBlock(uint32_t block_id) const {
@@ -51,7 +54,24 @@ size_t HardwareArchitecture::GetNumEventsForBlock(uint32_t block_id) const {
 
 size_t HardwareArchitecture::GetBytesNeededForBlock(uint32_t block_id) const {
   const auto& config = GetConfig();
-  return GetNumEventsForBlock(block_id) * config.xcc_count * sizeof(uint64_t);
+  size_t num_events = GetNumEventsForBlock(block_id);
+  size_t xcc_count = config.xcc_count;
+  size_t element_size = sizeof(uint64_t);
+
+  // Check for overflow: num_events * xcc_count * sizeof(uint64_t)
+  // Maximum safe value before overflow
+  constexpr size_t SIZE_MAX_SAFE = SIZE_MAX / sizeof(uint64_t);
+
+  if (num_events > SIZE_MAX_SAFE || xcc_count > SIZE_MAX_SAFE) {
+    throw std::overflow_error("Block size calculation would overflow");
+  }
+
+  size_t temp = num_events * xcc_count;
+  if (temp > SIZE_MAX_SAFE) {
+    throw std::overflow_error("Block size calculation would overflow");
+  }
+
+  return temp * element_size;
 }
 
 }  // namespace aql_profile

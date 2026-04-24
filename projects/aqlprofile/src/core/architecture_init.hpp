@@ -23,6 +23,7 @@
 #ifndef SRC_CORE_ARCHITECTURE_INIT_HPP_
 #define SRC_CORE_ARCHITECTURE_INIT_HPP_
 
+#include <memory>
 #include "util/hsa_rsrc_factory.h"
 
 namespace aql_profile {
@@ -32,9 +33,10 @@ namespace aql_profile {
 void InitializeArchitectureRegistry();
 
 /// Create architecture for a given agent
-/// Uses the registry to lookup and instantiate the appropriate architecture
+/// Returns unique_ptr to ensure clear ownership semantics
+/// Caller takes ownership of the returned architecture
 class HardwareArchitecture;
-HardwareArchitecture* CreateArchitectureForAgent(const AgentInfo* agent_info);
+std::unique_ptr<HardwareArchitecture> CreateArchitectureForAgent(const AgentInfo* agent_info);
 
 }  // namespace aql_profile
 

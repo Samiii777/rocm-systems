@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 
@@ -75,7 +76,10 @@ class ArchitectureRegistry {
   ArchitectureRegistry(const ArchitectureRegistry&) = delete;
   ArchitectureRegistry& operator=(const ArchitectureRegistry&) = delete;
 
-  mutable std::mutex mutex_;
+  // Use shared_mutex for better read concurrency
+  // Multiple threads can lookup simultaneously, only writes are exclusive
+  mutable std::shared_mutex mutex_;
+
   // Map from gfxip prefix to architecture
   // Ordered by key length (descending) to match longest prefix first
   std::map<std::string, std::unique_ptr<HardwareArchitecture>,

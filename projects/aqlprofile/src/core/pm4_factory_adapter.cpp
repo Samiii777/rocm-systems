@@ -28,9 +28,9 @@
 
 namespace aql_profile {
 
-Pm4FactoryAdapter::Pm4FactoryAdapter(HardwareArchitecture* architecture)
+Pm4FactoryAdapter::Pm4FactoryAdapter(std::unique_ptr<HardwareArchitecture> architecture)
     : Pm4Factory(BlockInfoMap(nullptr, 0)),
-      architecture_(architecture),
+      architecture_(std::move(architecture)),
       concurrent_mode_(false),
       spm_kfd_mode_(false) {
   if (!architecture_) {
@@ -46,7 +46,7 @@ Pm4FactoryAdapter::Pm4FactoryAdapter(HardwareArchitecture* architecture)
 }
 
 Pm4FactoryAdapter::~Pm4FactoryAdapter() {
-  // Note: architecture_ is owned by caller, don't delete it
+  // architecture_ is automatically deleted via unique_ptr
   // Builders are deleted by base class destructor
 }
 

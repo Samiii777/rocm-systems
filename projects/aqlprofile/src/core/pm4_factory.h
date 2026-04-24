@@ -88,11 +88,22 @@ class BlockInfoMap {
   // Find block by name
   // Return block id or UINT32_MAX if not found
   uint32_t Find(const char* name) const {
+    if (!name) return UINT32_MAX;  // Null check
+
+    // Validate string length to prevent excessive iteration
+    // Block names are typically short (e.g., "SQ", "GCR", "TCC")
+    constexpr size_t MAX_BLOCK_NAME_LEN = 64;
+    size_t name_len = strnlen(name, MAX_BLOCK_NAME_LEN + 1);
+    if (name_len > MAX_BLOCK_NAME_LEN) {
+      return UINT32_MAX;  // Name too long, invalid
+    }
+
     uint32_t index = 0;
     while (index < block_count_) {
       const GpuBlockInfo* entry = block_table_[index];
-      if (entry) {
-        if (strcmp(name, entry->name) == 0) break;
+      if (entry && entry->name) {
+        // Use strncmp with bounded length
+        if (strncmp(name, entry->name, MAX_BLOCK_NAME_LEN) == 0) break;
       }
       ++index;
     }

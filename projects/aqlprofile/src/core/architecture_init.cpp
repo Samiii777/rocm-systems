@@ -55,7 +55,7 @@ void InitializeArchitectureRegistry() {
   // to avoid needing full AgentInfo at initialization time
 }
 
-HardwareArchitecture* CreateArchitectureForAgent(const AgentInfo* agent_info) {
+std::unique_ptr<HardwareArchitecture> CreateArchitectureForAgent(const AgentInfo* agent_info) {
   if (!agent_info) return nullptr;
 
   std::string_view gfxip = agent_info->gfxip;
@@ -63,17 +63,17 @@ HardwareArchitecture* CreateArchitectureForAgent(const AgentInfo* agent_info) {
 
   // Create appropriate architecture based on gfxip
   if (prefix == "gfx908") {
-    return new Mi100Architecture(agent_info);
+    return std::make_unique<Mi100Architecture>(agent_info);
   } else if (prefix == "gfx90a") {
-    return new Mi200Architecture(agent_info);
+    return std::make_unique<Mi200Architecture>(agent_info);
   } else if (prefix == "gfx94") {
-    return new Mi300Architecture(agent_info);
+    return std::make_unique<Mi300Architecture>(agent_info);
   } else if (prefix == "gfx900" || prefix == "gfx902" || prefix == "gfx906" || prefix == "gfx90") {
-    return new Gfx9Architecture(agent_info);
+    return std::make_unique<Gfx9Architecture>(agent_info);
   } else if (prefix == "gfx10") {
-    return new Gfx10Architecture(agent_info);
+    return std::make_unique<Gfx10Architecture>(agent_info);
   } else if (prefix == "gfx11") {
-    return new Gfx11Architecture(agent_info);
+    return std::make_unique<Gfx11Architecture>(agent_info);
   }
 
   // Unknown architecture

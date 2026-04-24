@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <iostream>
 
 namespace aql_profile {
 
@@ -38,12 +39,14 @@ void ArchitectureRegistry::Register(const std::string& gfxip_prefix,
     throw std::invalid_argument("Cannot register null architecture");
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
+  // Exclusive lock for writes
+  std::unique_lock<std::shared_mutex> lock(mutex_);
   architectures_[gfxip_prefix] = std::move(architecture);
 }
 
 const HardwareArchitecture* ArchitectureRegistry::Lookup(std::string_view gfxip) const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  // Shared lock for reads - allows concurrent lookups
+  std::shared_lock<std::shared_mutex> lock(mutex_);
 
   // Try prefix matching - architectures_ is ordered by key length descending
   // so we check longest prefixes first
@@ -53,11 +56,23 @@ const HardwareArchitecture* ArchitectureRegistry::Lookup(std::string_view gfxip)
     }
   }
 
+  // Log failure to help with debugging
+  std::cerr << "AQLProfile: Unknown GPU architecture '" << gfxip
+            << "'. Supported architectures: ";
+  bool first = true;
+  for (const auto& [prefix, _] : architectures_) {
+    if (!first) std::cerr << ", ";
+    std::cerr << prefix;
+    first = false;
+  }
+  std::cerr << std::endl;
+
   return nullptr;
 }
 
 const HardwareArchitecture* ArchitectureRegistry::GetExact(const std::string& gfxip) const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  // Shared lock for reads
+  std::shared_lock<std::shared_mutex> lock(mutex_);
 
   auto it = architectures_.find(gfxip);
   if (it != architectures_.end()) {
@@ -68,7 +83,8 @@ const HardwareArchitecture* ArchitectureRegistry::GetExact(const std::string& gf
 }
 
 std::vector<std::string> ArchitectureRegistry::GetRegisteredPrefixes() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  // Shared lock for reads
+  std::shared_lock<std::shared_mutex> lock(mutex_);
 
   std::vector<std::string> prefixes;
   prefixes.reserve(architectures_.size());
@@ -81,7 +97,8 @@ std::vector<std::string> ArchitectureRegistry::GetRegisteredPrefixes() const {
 }
 
 void ArchitectureRegistry::Clear() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  // Exclusive lock for writes
+  std::unique_lock<std::shared_mutex> lock(mutex_);
   architectures_.clear();
 }
 

@@ -33,7 +33,8 @@ namespace aql_profile {
 class Pm4FactoryAdapter : public Pm4Factory {
  public:
   /// Create factory using new architecture system
-  explicit Pm4FactoryAdapter(HardwareArchitecture* architecture);
+  /// Takes ownership of the architecture
+  explicit Pm4FactoryAdapter(std::unique_ptr<HardwareArchitecture> architecture);
   virtual ~Pm4FactoryAdapter();
 
   // Pm4Factory interface
@@ -80,7 +81,7 @@ class Pm4FactoryAdapter : public Pm4Factory {
   void InitializeBuilders();
   gpu_id_t MapToLegacyGpuId() const;
 
-  HardwareArchitecture* architecture_;
+  std::unique_ptr<HardwareArchitecture> architecture_;
   bool concurrent_mode_;
   bool spm_kfd_mode_;
   mutable std::string gfx_name_;
