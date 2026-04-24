@@ -43,9 +43,30 @@ class Pm4FactoryAdapter : public Pm4Factory {
   bool SpmKfdMode() const override { return spm_kfd_mode_; }
 
   pm4_builder::CmdBuilder* GetCmdBuilder() const override { return cmd_builder_; }
-  pm4_builder::PmcBuilder* GetPmcBuilder() const override { return pmc_builder_; }
-  pm4_builder::SpmBuilder* GetSpmBuilder() const override { return spm_builder_; }
-  pm4_builder::SqttBuilder* GetSqttBuilder() const override { return sqtt_builder_; }
+
+  pm4_builder::PmcBuilder* GetPmcBuilder() const override {
+    if (!pmc_builder_) {
+      throw aql_profile_exc_msg("PMC builder not available in new architecture system. "
+                                "Use legacy Pm4Factory for PMC profiling.");
+    }
+    return pmc_builder_;
+  }
+
+  pm4_builder::SpmBuilder* GetSpmBuilder() const override {
+    if (!spm_builder_) {
+      throw aql_profile_exc_msg("SPM builder not available in new architecture system. "
+                                "Use legacy Pm4Factory for SPM profiling.");
+    }
+    return spm_builder_;
+  }
+
+  pm4_builder::SqttBuilder* GetSqttBuilder() const override {
+    if (!sqtt_builder_) {
+      throw aql_profile_exc_msg("SQTT builder not available in new architecture system. "
+                                "Use legacy Pm4Factory for thread trace profiling.");
+    }
+    return sqtt_builder_;
+  }
 
   uint32_t GetShaderEnginesNumber() const override;
   uint32_t GetShaderArraysNumber() const override;
@@ -75,7 +96,7 @@ class Pm4FactoryAdapter : public Pm4Factory {
   int GetAccumHiID() const override;
 
   // Access to architecture
-  const HardwareArchitecture* GetArchitecture() const { return architecture_; }
+  const HardwareArchitecture* GetArchitecture() const { return architecture_.get(); }
 
  private:
   void InitializeBuilders();

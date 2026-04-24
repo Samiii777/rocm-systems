@@ -57,13 +57,29 @@ void Pm4FactoryAdapter::InitializeBuilders() {
     throw aql_profile_exc_msg("Failed to create CmdBuilder from architecture");
   }
 
-  // For now, builders still need to be created using old template system
-  // This will be refactored in a future phase
-  // We can't fully replace the builders yet because they're template-heavy
-  // and depend on architecture-specific primitives
+  // CRITICAL TODO: PMC/SPM/SQTT builder integration incomplete
+  // The new architecture system does not yet fully support these builders
+  // They require template-based instantiation with architecture-specific primitives
+  //
+  // Current impact:
+  // - PMC profiling: Will fail when GetPmcBuilder() is called
+  // - SPM profiling: Will fail when GetSpmBuilder() is called
+  // - SQTT profiling: Will fail when GetSqttBuilder() is called
+  //
+  // Workaround: Code using Pm4FactoryAdapter should check for nullptr
+  // before using builders and fall back to old Pm4Factory if needed
+  //
+  // TODO for next phase:
+  // 1. Create builder factory that uses RegisterSchema + HardwareConfig
+  // 2. Eliminate template dependency on gfx*_primitives.h
+  // 3. Support runtime builder selection based on architecture
+  //
+  // See ARCHITECTURE_DESIGN.md for migration status
 
-  // TODO: Refactor builders to use RegisterSchema and HardwareConfig
-  // For now, return nullptr and let existing code handle it
+  std::cerr << "WARNING: Pm4FactoryAdapter builders (PMC/SPM/SQTT) not yet implemented. "
+            << "Profiling functionality may be limited. Use legacy Pm4Factory for full support."
+            << std::endl;
+
   pmc_builder_ = nullptr;
   spm_builder_ = nullptr;
   sqtt_builder_ = nullptr;
