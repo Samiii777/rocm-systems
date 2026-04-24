@@ -28,19 +28,137 @@ import sys
 import os
 
 from pathlib import Path
+from typing import Optional
 
 current_path = os.path.dirname(os.path.abspath(__file__))
 python_lib_path = f"{current_path}/../../share/amd_smi"
-sys.path.insert(0, python_lib_path)
-# Prioritize the library from this installation over any pip-installed version
+# Only fallback to the python library if its a compatible version
+# multiple amdsmi versions installed on the system could cause issues
+
+# Ideally we want to identify if the installed python library is incompatible and log a solution to the user
+#   LD library config or reinstall, etc...
+# The problem is coming from the switch over between the post install and pypi
+
+
+def _log_version_and_path_diagnostics():
+    """Emit best-effort diagnostics about the amdsmi Python package and the shared library location."""
+    try:
+        from amdsmi import _version  # type: ignore
+
+        pkg_version = getattr(_version, "__version__", "unknown")
+    except Exception as exc:  # pragma: no cover - defensive
+        pkg_version = f"unavailable ({exc})"
+
+    # Resolve paths from the *wrapper* module, not from this CLI file.
+    # The wrapper lives in the amdsmi package dir; the CLI lives elsewhere.
+    try:
+        import amdsmi.amdsmi_wrapper as _w
+
+        wrapper_path = Path(_w.__file__).resolve()
+        wrapper_dir = wrapper_path.parent
+    except Exception:
+        wrapper_dir = Path("<unknown>")
+
+    print(f"[amdsmi-cli] Python package version: {pkg_version}")
+    print(f"[amdsmi-cli] CLI dir: {Path(__file__).resolve().parent}")
+    print(f"[amdsmi-cli] Wrapper dir: {wrapper_dir}")
+    print(f"[amdsmi-cli] sys.path[0]: {sys.path[0]}")
+
+
+def _add_known_python_paths():
+    """Ensure common install locations for the amdsmi package are on sys.path."""
+    candidates = []
+    for root in ("/opt/rocm", "/usr/local", "/usr"):
+        candidates.extend(Path(root).glob("lib*/python3*/site-packages"))
+    candidates.append(Path(python_lib_path))
+    for c in candidates:
+        if c.is_dir() and str(c) not in sys.path:
+            sys.path.insert(0, str(c))
+
+
+def _check_version_compatibility(expected_version: Optional[str] = None) -> None:
+    """
+    Verify that the Python package version matches the expected CLI/lib version (if provided).
+    If mismatched, log guidance and abort to avoid loading an incompatible library.
+
+    The actual library loading (pip vs system context) is handled entirely by
+    amdsmi_wrapper._load_library().  This function only checks version strings
+    and that the wrapper can resolve *some* loadable library candidate.
+    """
+    try:
+        from amdsmi import _version  # type: ignore
+
+        pkg_version = getattr(_version, "__version__", None)
+    except Exception:
+        _log_version_and_path_diagnostics()
+        print("[amdsmi-cli] Failed to read amdsmi Python package version.")
+        if expected_version:
+            print(
+                "[amdsmi-cli] Aborting to avoid incompatibility with expected version "
+                f"{expected_version}."
+            )
+            sys.exit(1)
+        return
+
+    if expected_version and pkg_version and pkg_version != expected_version:
+        _log_version_and_path_diagnostics()
+        print(f"[amdsmi-cli] Version mismatch: expected {expected_version}, found {pkg_version}.")
+        print(
+            "[amdsmi-cli] Please install a matching amdsmi wheel from PyPI or reinstall the ROCm package,"
+        )
+        print(
+            "[amdsmi-cli] and ensure LD_LIBRARY_PATH/ldconfig points to the matching shared library."
+        )
+        sys.exit(1)
+
+    # Delegate the library-existence check to the wrapper's own detection logic.
+    # _build_candidate_paths() uses the wrapper's __file__ to correctly resolve
+    # pip (libamd_smi_python.so next to wrapper) vs system (/opt/rocm/lib/libamd_smi.so).
+    try:
+        from amdsmi.amdsmi_wrapper import _build_candidate_paths
+
+        candidates = _build_candidate_paths()
+        for candidate in candidates:
+            if isinstance(candidate, str):
+                # bare "libamd_smi.so" — let the dynamic linker resolve it later
+                return
+            if candidate.exists():
+                return
+    except Exception:
+        # If the wrapper isn't importable at all, fall through to the
+        # ImportError handler in the try/except block below.
+        return
+
+    _log_version_and_path_diagnostics()
+    print("[amdsmi-cli] Unable to locate the AMD SMI shared library in expected locations:")
+    for c in candidates:
+        print(f"  - {c}")
+    print("[amdsmi-cli] Install the amdsmi wheel that bundles the Python shared library,")
+    print("[amdsmi-cli] or adjust LD_LIBRARY_PATH/ldconfig to point to a compatible lib.")
+    sys.exit(1)
+
 
 try:
+    # TODO Add version checking & debug to check pathing
+    # The expected version string can be wired in from packaging if desired.
+    _add_known_python_paths()
+    _check_version_compatibility(expected_version=None)
     from amdsmi import amdsmi_interface, amdsmi_exception
 except ImportError as e:
-    print(f"Unhandled import error: {e}")
-    print("Failed to import the amdsmi Python library. Ensure it is installed in Python.")
-    print(f"Alternatively, verify that the library is in the path:\n{python_lib_path}")
-    sys.exit(1)
+    # If site-packages didn't have it, try the legacy /opt/rocm/share path.
+    if python_lib_path not in sys.path:
+        sys.path.insert(0, python_lib_path)
+        try:
+            from amdsmi import amdsmi_interface, amdsmi_exception
+        except ImportError:
+            pass
+        else:
+            print(f"[amdsmi-cli] Imported amdsmi from fallback path {python_lib_path}")
+    if "amdsmi_interface" not in globals():
+        print(f"Unhandled import error: {e}")
+        print("Failed to import the amdsmi Python library. Ensure it is installed in Python.")
+        print(f"Alternatively, verify that the library is in the path:\n{python_lib_path}")
+        sys.exit(1)
 
 # Using basic python logging for user errors and development
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR)  # User level logging
