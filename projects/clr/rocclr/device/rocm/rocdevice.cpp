@@ -1749,6 +1749,11 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
                      dedicated_queue);
 
   if (!virtualDevice->create()) {
+#if defined(__APPLE__)
+    if (virtualDevice->gpu_queue() == nullptr && virtualDevice->createHostBlitOnly()) {
+      return virtualDevice;
+    }
+#endif
     delete virtualDevice;
     return nullptr;
   }
@@ -2866,7 +2871,12 @@ VirtualGPU* Device::xferQueue() const {
       return nullptr;
     }
     if (xferQueue_->gpu_queue() == nullptr) {
+#if defined(__APPLE__)
+      xferQueue_->enableSyncBlit();
+      return xferQueue_;
+#else
       xferQueue_->set_gpu_queue(thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal));
+#endif
     }
   }
   xferQueue_->enableSyncBlit();
