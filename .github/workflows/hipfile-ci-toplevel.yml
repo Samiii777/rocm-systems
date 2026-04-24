@@ -24,6 +24,7 @@ jobs:
     runs-on: [ubuntu-24.04]
     outputs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+      ci_images: ${{ steps.ci-images.outputs.ci_images }}
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Fetching code repository...
@@ -46,6 +47,33 @@ jobs:
         id: matrix
         run: |
           echo 'matrix={"supported_platforms":["rocky","suse","ubuntu"],"rocm_versions":["7.2.2"]}' >> "${GITHUB_OUTPUT}"
+      - name: Compute CI image names
+        id: ci-images
+        env:
+          REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
+          CHANGED: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+        run: |
+          JSON='{}'
+          for platform in rocky suse ubuntu; do
+            for version in 7.2.2; do
+              if [ "${CHANGED}" = "1" ]; then
+                tag="$(echo "${GITHUB_REF}" | sed 's|[^a-zA-Z0-9]|-|g')-rocm${version}"
+              else
+                tag="latest-rocm${version}"
+              fi
+              key="${platform}-${version}"
+              img="${REGISTRY}/ais_ci_${platform}:${tag}"
+              img="$(printf '%s' "${img}" | tr '[:upper:]' '[:lower:]')"
+              cache="${REGISTRY}/ais_ci_${platform}:latest-rocm${version}-cache"
+              cache="$(printf '%s' "${cache}" | tr '[:upper:]' '[:lower:]')"
+              JSON=$(echo "${JSON}" | jq -c \
+                --arg k "${key}" \
+                --arg img "${img}" \
+                --arg cache "${cache}" \
+                '. + {($k): {"ci_image": $img, "ci_image_cache": $cache}}')
+            done
+          done
+          echo "ci_images=${JSON}" >> "${GITHUB_OUTPUT}"
 
   hipfile-CI:
     needs: [AIS_CI_Pre-check]
