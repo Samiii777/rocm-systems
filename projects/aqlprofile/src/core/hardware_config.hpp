@@ -31,7 +31,9 @@ namespace aql_profile {
 /// Hardware configuration data for a specific GPU architecture
 /// Consolidates architecture-specific constants that were previously
 /// scattered throughout builders and factories
-struct HardwareConfig {
+///
+/// Cache line aligned to prevent false sharing in multi-threaded access
+struct alignas(64) HardwareConfig {
   // Architecture identification
   std::string gfxip;          // e.g., "gfx90a", "gfx940", "gfx1100"
   std::string name;            // Human-readable name, e.g., "MI200", "RDNA3"
