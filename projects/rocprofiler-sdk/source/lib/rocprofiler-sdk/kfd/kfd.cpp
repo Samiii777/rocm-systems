@@ -960,7 +960,7 @@ struct poll_kfd_t
             if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
             {
                 auto gpu_event_fd = get_node_fd(agent->gpu_id);
-                file_handles.emplace_back(pollfd{gpu_event_fd, POLLIN, 0});
+                file_handles.emplace_back(pollfd{gpu_event_fd, static_cast<short>(POLLIN | POLLPRI), 0});
                 ROCP_INFO << fmt::format(
                     "GPU node {} with fd {} added\n", agent->gpu_id, gpu_event_fd);
             }
@@ -1689,7 +1689,13 @@ poll_events(small_vector<pollfd> file_handles, const std::shared_ptr<poll_contro
             }
 
             // We have data to read, perhaps multiple events
-            if((fd.revents & POLLIN) != 0)
+            if((fd.revents & POLLPRI) != 0)
+            {
+                ROCP_INFO << fmt::format(
+                    "KFD GPU event fd {} reported POLLPRI readiness", fd.fd);
+            }
+
+            if((fd.revents & (POLLIN | POLLPRI)) != 0)
             {
                 processed_gpu_events = true;
                 ++gpu_read_calls;
