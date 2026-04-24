@@ -41,11 +41,12 @@ using inst_pkt_t =
 
 union rocprofiler_packet
 {
-    hsa_ext_amd_aql_pm4_packet_t ext_amd_aql_pm4;
-    hsa_kernel_dispatch_packet_t kernel_dispatch;
-    hsa_barrier_and_packet_t     barrier_and;
-    hsa_barrier_or_packet_t      barrier_or;
-    amd_aql_intercept_marker_t   marker;
+    hsa_ext_amd_aql_pm4_packet_t         ext_amd_aql_pm4;
+    hsa_kernel_dispatch_packet_t         kernel_dispatch;
+    hsa_amd_ext_kernel_dispatch_packet_t ext_kernel_dispatch;
+    hsa_barrier_and_packet_t             barrier_and;
+    hsa_barrier_or_packet_t              barrier_or;
+    amd_aql_intercept_marker_t           marker;
 
     rocprofiler_packet()
     : ext_amd_aql_pm4{null_amd_aql_pm4_packet}
@@ -69,6 +70,10 @@ union rocprofiler_packet
 
     rocprofiler_packet(amd_aql_intercept_marker_t val)
     : marker{val}
+    {}
+
+    rocprofiler_packet(hsa_amd_ext_kernel_dispatch_packet_t val)
+    : ext_kernel_dispatch{val}
     {}
 
     ~rocprofiler_packet()                             = default;
