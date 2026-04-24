@@ -488,10 +488,6 @@ class MemcpyCommandHelper {
         queueDevice_(&stream.device()) {}
 
   ~MemcpyCommandHelper() {
-    // Cleanup: release waitList command if present
-    if (waitList_.size() > 0) {
-      waitList_[0]->release();
-    }
   }
 
   // Non-copyable, non-movable
