@@ -20,14 +20,6 @@ on:
         description: "JSON map of platform-version to image names (passed through as output)"
         required: true
         type: string
-      dockerfile_changed:
-        # While this seems like a smell to not make this check in this workflow,
-        # it allows us to skip the job entirely. This yields the benefit of
-        # letting downstream jobs start sooner and keeping the job result as
-        # 'skipped' if a new CI image is not needed.
-        description: Hint for if this workflow actually needs to run.
-        required: true
-        type: boolean
       platform:
         required: true
         type: string
@@ -66,7 +58,6 @@ permissions:
 jobs:
 
   build_AIS_image:
-    if: ${{ inputs.dockerfile_changed }}
     runs-on: [ubuntu-24.04]
     container: docker:28.5
     steps:
