@@ -345,22 +345,14 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
     case ENOTSUP:
       return RSMI_STATUS_NOT_SUPPORTED;
     case EROFS: {
-      // EROFS means the underlying filesystem is read-only at the time of
-      // the write. This is an *environmental* condition (sysfs mounted
-      // read-only in a container, recovery boot, etc.) and is distinct from
-      // a feature the kernel does not expose at all (which surfaces as
-      // ENOENT/ENOTSUP -> NOT_SUPPORTED above). We therefore map EROFS to
-      // RSMI_STATUS_PERMISSION so callers can distinguish a true
-      // "feature not supported by this driver/ASIC" from a "this host
-      // cannot write to sysfs right now" condition. A diagnostic is logged
-      // so an operator inspecting logs sees the actionable hint.
+      // EROFS is environmental: the sysfs attribute exists but the
+      // filesystem is read-only (e.g. unprivileged container). Distinct
+      // from a kernel-unsupported feature which surfaces as ENOENT/ENOTSUP
+      // above. Map to PERMISSION so callers can tell the two apart.
       std::ostringstream ss;
       ss << __PRETTY_FUNCTION__
-         << " | EROFS from sysfs write -> mapping to RSMI_STATUS_PERMISSION."
-         << " The sysfs attribute exists but the filesystem is currently"
-         << " read-only. Verify that sysfs is mounted read-write (e.g."
-         << " container started with --privileged or -v /sys:/sys, or"
-         << " host not booted in recovery mode).";
+         << " | EROFS from sysfs write -> RSMI_STATUS_PERMISSION"
+         << " (sysfs mounted read-only).";
       LOG_INFO(ss);
       return RSMI_STATUS_PERMISSION;
     }

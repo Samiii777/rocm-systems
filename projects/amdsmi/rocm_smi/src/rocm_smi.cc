@@ -3137,32 +3137,23 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
   //
   // NOTE:  kDevPCIEClk sysfs file may not exist for all cases.
-  //        If it doesn't exist (pp_dpm_pcie), it shouldn't be an error
-  //        and will get translated to RSMI_STATUS_NOT_SUPPORTED.
-  //        On some devices, writing to pp_dpm_pcie may fail with
-  //        ENOTSUP/EOPNOTSUPP (these are the same value on Linux, see
-  //        <asm-generic/errno.h>) or an unmapped errno because the kernel
-  //        driver exposes the file but does not support PCIe bandwidth
-  //        control.
+  //        If it doesn't exist (pp_dpm_pcie), it is translated to
+  //        RSMI_STATUS_NOT_SUPPORTED. ENOTSUP/EOPNOTSUPP (same value on
+  //        Linux, see <asm-generic/errno.h>) and unmapped errnos are
+  //        likewise treated as NOT_SUPPORTED.
   ret = amd::smi::ErrnoToRsmiStatus(ret_i);
   if (ret != RSMI_STATUS_SUCCESS) {
-    // Restore perf level to AUTO since we set it to MANUAL above. The
-    // restore is best-effort: if it also fails we cannot leave the device
-    // in MANUAL silently, so log and surface the original write failure to
-    // the caller. The user-visible status is still the original failure of
-    // the bandwidth write (NOT_SUPPORTED / PERMISSION / etc.), which is
-    // what the caller asked about; the perf-level rollback warning gives
-    // an operator the breadcrumb to recover the device state.
+    // Best-effort restore of perf level to AUTO. If the restore also fails
+    // log it so an operator can recover device state; the original write
+    // failure is still returned to the caller.
     rsmi_status_t restore_ret =
         rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
     if (restore_ret != RSMI_STATUS_SUCCESS) {
       std::ostringstream restore_ss;
       restore_ss << __PRETTY_FUNCTION__
-                 << " | failed to restore perf level to AUTO after"
-                 << " pp_dpm_pcie write failure (restore_ret="
-                 << restore_ret << ", original_ret=" << ret << ")."
-                 << " Device may remain in MANUAL perf level; caller"
-                 << " should re-issue rsmi_dev_perf_level_set_v1(AUTO).";
+                 << " | perf level restore to AUTO failed (restore_ret="
+                 << restore_ret << ", original_ret=" << ret
+                 << "). Device may remain in MANUAL.";
       LOG_ERROR(restore_ss);
     }
     if (ret == RSMI_STATUS_UNKNOWN_ERROR) {
