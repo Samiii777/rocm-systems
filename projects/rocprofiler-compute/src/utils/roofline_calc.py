@@ -379,7 +379,7 @@ def calc_ai_analyze(
             console_debug("roofline", f"No PMC data for kernel {kernel_id}")
             continue
 
-        kernel_only_data = {"pmc_perf": kernel_pmc_df["pmc_perf"]}
+        kernel_only_data = pd.concat({"pmc_perf": kernel_pmc_df["pmc_perf"]}, axis=1)
 
         kernel_dfs: dict[int, pd.DataFrame] = {}
         kernel_dfs_type: dict[int, str] = {}
