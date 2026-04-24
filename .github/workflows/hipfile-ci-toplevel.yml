@@ -51,7 +51,7 @@ jobs:
         id: ci-images
         env:
           REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
-          CHANGED: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+          CHANGED: ${{ steps.ci-flags.outputs.changed_dockerfile == '1' }}
         run: |
           JSON='{}'
           for platform in rocky suse ubuntu; do
@@ -76,6 +76,7 @@ jobs:
           echo "ci_images=${JSON}" >> "${GITHUB_OUTPUT}"
 
   build_AIS_CI_image:
+    if: ${{ needs.AIS_CI_Pre-check.outputs.changed_dockerfile == '1' }}
     needs: AIS_CI_Pre-check
     permissions:
       contents: read
