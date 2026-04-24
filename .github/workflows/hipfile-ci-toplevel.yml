@@ -93,6 +93,13 @@ jobs:
       rocm_version: ${{ matrix.rocm_versions }}
 
   hipfile-CI:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_AIS_CI_image.result == 'success' ||
+          needs.build_AIS_CI_image.result == 'skipped'
+        )
+      }}
     needs: [AIS_CI_Pre-check, build_AIS_CI_image]
     strategy:
       fail-fast: false
