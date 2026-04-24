@@ -6,7 +6,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available. ``--bench-only`` is mutually exclusive with ``--block``, ``--set``, ``--roof-only``, and ``--no-roof``.
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
 
 ### Changed
@@ -20,6 +19,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.
 
 ### Optimized
+
+* Accelerated analysis mode metric evaluation by introducing `PmcDataCache`, which flattens the MultiIndex counter DataFrame and centralizes `pmc_perf` / `SQ_ACCUM_PREV_HIRES`. This eliminates repeated MultiIndex lookups.
 
 ### Resolved issues
 
