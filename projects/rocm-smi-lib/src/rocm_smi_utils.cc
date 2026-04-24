@@ -343,8 +343,23 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
     case EPERM:
     case ENOENT:
     case ENOTSUP:
-    case EROFS:
       return RSMI_STATUS_NOT_SUPPORTED;
+    case EROFS: {
+      // EROFS is ambiguous: it is returned both when the kernel driver does
+      // not expose a write attribute for this feature (true "not supported")
+      // and when the underlying mount itself is read-only (e.g. sysfs mounted
+      // read-only inside a container, or recovery boot). We surface
+      // NOT_SUPPORTED so callers get a stable, actionable status, and emit a
+      // diagnostic so an operator inspecting logs can distinguish the two.
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__
+         << " | EROFS from sysfs write -> mapping to RSMI_STATUS_NOT_SUPPORTED."
+         << " If the attribute is expected to be writable, verify that sysfs"
+         << " is mounted read-write (e.g. container with --privileged or"
+         << " -v /sys:/sys).";
+      LOG_INFO(ss);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
     case EBADF:
     case EISDIR:
       return RSMI_STATUS_FILE_ERROR;
