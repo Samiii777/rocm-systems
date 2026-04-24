@@ -3622,6 +3622,7 @@ bool GraphSignalPool::Allocate(size_t count) {
     if (ps == nullptr) return false;
     signals_.push_back(ps);
   }
+  capacity_.store(signals_.size(), std::memory_order_release);
   next_idx_.store(0);
   irq_next_idx_.store(0);
   return true;
@@ -3634,6 +3635,7 @@ bool GraphSignalPool::AllocateIrq(size_t count, bool system_scope) {
     if (ps == nullptr) return false;
     irq_signals_.push_back(ps);
   }
+  irq_capacity_.store(irq_signals_.size(), std::memory_order_release);
   irq_next_idx_.store(0);
   return true;
 }
@@ -3646,6 +3648,7 @@ ProfilingSignal* GraphSignalPool::GrowAndAcquire(size_t idx) {
     if (ps == nullptr) return nullptr;
     signals_.push_back(ps);
   }
+  capacity_.store(signals_.size(), std::memory_order_release);
   return signals_[idx];
 }
 
@@ -3657,6 +3660,7 @@ ProfilingSignal* GraphSignalPool::GrowAndAcquireIrq(size_t idx, bool system_scop
     if (ps == nullptr) return nullptr;
     irq_signals_.push_back(ps);
   }
+  irq_capacity_.store(irq_signals_.size(), std::memory_order_release);
   return irq_signals_[idx];
 }
 
