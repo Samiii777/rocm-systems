@@ -59,6 +59,7 @@
 # Experimental
 /experimental/perf-dkms                                               @bwelton
 /experimental/rocjitsu                                                @atgutier
+/experimental/sqtt-instrumentation                                    @ApoKalipse-V
 
 # Documentation-specific ownership by project (last to take precedence)
 
