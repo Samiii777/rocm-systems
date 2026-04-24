@@ -3125,27 +3125,16 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
-    // The perf-level write failed, so the kernel-side perf level was NOT
-    // changed (writeDevInfoStr only returns success after a fully-completed
-    // write). There is therefore nothing to roll back here, and we propagate
-    // the original status (e.g. NOT_SUPPORTED, PERMISSION) unchanged so the
-    // caller can react to the real cause of failure.
     return ret;
   }
 
   int32_t ret_i;
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
-  //
-  // NOTE:  kDevPCIEClk sysfs file may not exist for all cases.
-  //        If it doesn't exist (pp_dpm_pcie), it is translated to
-  //        RSMI_STATUS_NOT_SUPPORTED. ENOTSUP/EOPNOTSUPP (same value on
-  //        Linux, see <asm-generic/errno.h>) and unmapped errnos are
-  //        likewise treated as NOT_SUPPORTED.
+  // kDevPCIEClk (pp_dpm_pcie) may be missing or read-only; map to a clear
+  // status. ENOTSUP/EOPNOTSUPP are the same value on Linux
+  // (see <asm-generic/errno.h>); EROFS is handled in ErrnoToRsmiStatus.
   ret = amd::smi::ErrnoToRsmiStatus(ret_i);
   if (ret != RSMI_STATUS_SUCCESS) {
-    // Best-effort restore of perf level to AUTO. If the restore also fails
-    // log it so an operator can recover device state; the original write
-    // failure is still returned to the caller.
     rsmi_status_t restore_ret =
         rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
     if (restore_ret != RSMI_STATUS_SUCCESS) {

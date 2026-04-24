@@ -182,9 +182,7 @@ void TestPciReadWrite::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED ||
         ret == amdsmi_status_t::AMDSMI_STATUS_NO_PERM) {
-      // NOT_SUPPORTED: kernel does not expose pp_dpm_pcie for this ASIC.
-      // NO_PERM:       sysfs is read-only (EROFS), environmental.
-      // Library has already restored the perf level on its failure path.
+      // NOT_SUPPORTED: pp_dpm_pcie absent. NO_PERM: sysfs read-only (EROFS).
       auto status_string("");
       amdsmi_status_code_to_string(ret, &status_string);
       std::cout << "\t\t** amdsmi_set_gpu_pci_bandwidth(): " << status_string << "\n";
