@@ -5,9 +5,16 @@
 ###############################################################################
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml" _PERFXPERT_PYPROJECT)
+string(REGEX MATCH "version[ \t]*=[ \t]*\"([^\"]+)\"" _PERFXPERT_VERSION_MATCH "${_PERFXPERT_PYPROJECT}")
+if(NOT CMAKE_MATCH_1)
+    message(FATAL_ERROR "Unable to read perfxpert version from pyproject.toml")
+endif()
+set(PERFXPERT_VERSION "${CMAKE_MATCH_1}")
+
 project(
     perfxpert
-    VERSION 0.1.0
+    VERSION ${PERFXPERT_VERSION}
     DESCRIPTION "AI-powered GPU trace analysis for rocprofiler-sdk databases"
     LANGUAGES NONE
 )
