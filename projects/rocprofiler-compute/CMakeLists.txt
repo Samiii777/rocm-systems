@@ -497,13 +497,13 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
+# RDNA3.5 memory chart CLI (Rich) — no GPU required
 add_test(
-    NAME test_mem_chart
+    NAME test_mem_chart_gfx11
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
+        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -536,6 +536,18 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_analysis_db.xml ${COV_OPTION} tests/test_analysis_db.py
         ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# PMC data cache tests
+# -----------------------------------
+
+add_test(
+    NAME test_pmc_data_cache
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_pmc_data_cache.xml ${COV_OPTION}
+        tests/test_pmc_data_cache.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -668,11 +680,12 @@ if(${ENABLE_COVERAGE})
         test_analyze_commands
         test_analyze_workloads
         test_metric_utils
+        test_pmc_data_cache
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
-        test_mem_chart
+        test_mem_chart_gfx11
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
