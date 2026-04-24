@@ -1562,6 +1562,11 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
   const uint16_t num_entries = op.num_entries;
   constexpr size_t kBroadcastMaxSize = 1024 * 1024;
 
+  // Check for linearB2BCopy override: pack one linear copy packet per dst
+  // back-to-back in a single SDMA submission on BlitHostToDev, bypassing HW
+  // broadcast.  Enable with HSA_SDMA_LINEAR_B2B=1.
+  const bool use_linear_b2b = core::Runtime::runtime_singleton_->flag().sdma_linear_b2b();
+
   // Try HW broadcast for small transfers.
   if (op.size < kBroadcastMaxSize) {
     SetCopyRequestRefCount(true);
@@ -1570,6 +1575,22 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
     lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
     if (blit->isSDMA()) {
       BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
+
+      if (use_linear_b2b) {
+        if (profiling_enabled())
+          out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+
+        LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                 "SDMA linearB2BCopy using engine %02u, src=%p, num_entries=%u, size=%zu, "
+                 "dep_signal=0x%zx, completion_signal=0x%zx",
+                 BlitHostToDev, op.src, num_entries, op.size,
+                 dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                 out_signal_obj->signal_);
+        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+        return sdma_blit->SubmitLinearCopyB2BCommand(
+            dsts, op.src, op.size, dep_signals, out_signal);
+      }
+
       if (sdma_blit->BroadcastSupported()) {
         if (profiling_enabled())
           out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
