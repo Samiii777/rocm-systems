@@ -24,6 +24,7 @@ jobs:
     runs-on: [ubuntu-24.04]
     outputs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -41,18 +42,16 @@ jobs:
         id: ci-flags
         run: |
           echo "changed_dockerfile=$(./util/files-changed.sh "origin/${GITHUB_BASE_REF}" HEAD 'projects/hipfile/util/docker/DOCKERFILE.*')" >> "${GITHUB_OUTPUT}"
+      - name: Compute matrix configuration
+        id: matrix
+        run: |
+          echo 'matrix={"supported_platforms":["rocky","suse","ubuntu"],"rocm_versions":["7.2.2"]}' >> "${GITHUB_OUTPUT}"
 
   hipfile-CI:
     needs: [AIS_CI_Pre-check]
     strategy:
       fail-fast: false
-      matrix:
-        supported_platforms:
-          - rocky
-          - suse
-          - ubuntu
-        rocm_versions:
-          - 7.2.2
+      matrix: ${{ fromJSON(needs.AIS_CI_Pre-check.outputs.matrix) }}
     uses: ./.github/workflows/hipfile-ci.yml
     with:
       dockerfile_changed: ${{ needs.AIS_CI_Pre-check.outputs.changed_dockerfile == '1' }}
