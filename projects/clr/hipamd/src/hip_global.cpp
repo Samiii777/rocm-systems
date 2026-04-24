@@ -258,7 +258,7 @@ hipError_t Var::AllocateManagedVarPtr() {
     // If the device does not support HMM, we cannot use the host pointer,
     // since the device pointer could map to a different address.
     const bool dev_supports_hmm = hip::host_context->devices()[0]->info_.hmmSupported_;
-    const bool use_host_ptr = dev_supports_hmm ? true : false;
+    const bool use_host_ptr = dev_supports_hmm;
 
     // Allocate managed memory for this var
     IHIP_RETURN_ONFAIL(ihipMallocManaged(pointer, size_, align_, use_host_ptr));
