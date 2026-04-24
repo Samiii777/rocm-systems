@@ -106,6 +106,6 @@ jobs:
       matrix: ${{ fromJSON(needs.AIS_CI_Pre-check.outputs.matrix) }}
     uses: ./.github/workflows/hipfile-ci.yml
     with:
-      ci_image: ${{ fromJSON(needs.build_AIS_CI_image.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
+      ci_image: ${{ fromJSON(needs.AIS_CI_Pre-check.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
