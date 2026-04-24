@@ -3114,8 +3114,12 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
     return hipErrorInvalidValue;
   }
 
-  int deviceId = hip::getStream(stream)->DeviceId();
-  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().InitManagedVarDevicePtr(deviceId));
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+	
+  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().InitManagedVarDevicePtr(hip_stream->DeviceId()));
 
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(dst, offset);
@@ -3139,10 +3143,7 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
       isAsync = true;
     }
   }
-  hip::Stream* hip_stream = hip::getStream(stream);
-  if (hip_stream == nullptr) {
-    return hipErrorOutOfMemory;
-  }
+
   amd::Command* command = nullptr;
   hip_error = ihipMemsetCommand(command, memObj, value, valueSize, sizeBytes, hip_stream, offset);
   if (hip_error != hipSuccess) {
