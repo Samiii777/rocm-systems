@@ -105,8 +105,13 @@ def detect_missing_counters(
                 f"Insufficient number of kernel calls for kernels: "
                 f"{', '.join(kernels_with_missing_counters)} "
                 f"to collect all counters using iteration multiplexing. "
-                f"Please use kernel filtering and exclude the above kernels "
-                f"or turn off iteration multiplexing."
+                f"These kernels do not have enough dispatches to fill all "
+                f"{num_files} counter sets. Use kernel filtering (-k) to "
+                f"profile only the kernels of interest, e.g.: "
+                f"rocprof-compute profile -k <your_kernel> "
+                f"--iteration-multiplexing -- <app>. "
+                f"Alternatively, remove --iteration-multiplexing to use "
+                f"application replay instead."
             ),
         )
 
@@ -454,6 +459,11 @@ class OmniAnalyze_Base:
         if format_rocprof == "rocpd":
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
             result_files = list(workload_dir.glob("results_*.csv"))
+
+            console_warning(
+                "Reading intermediate results_*.csv files is deprecated and "
+                "will be removed in a future release."
+            )
 
             with open(output_file, "w", newline="") as outfile:
                 writer = None
