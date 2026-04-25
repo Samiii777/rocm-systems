@@ -5048,7 +5048,7 @@ No public C API additions — `LivenessAnalysis` is consumed internally by `Spil
 
 | Task | New Files |
 |---|---|
-| `WaitcntTranslator`: encode/decode `s_waitcnt` for GFX9 (CDNA1/2/3/4), GFX10 (RDNA1/2; has `s_waitcnt_vscnt` for store counts), GFX11 (RDNA3/3.5 use split `s_wait_*` instructions), GFX12 (RDNA4 uses `s_wait_storecnt_dscnt`); map flag semantics across formats | `dbt/waitcnt_translator.h/.cpp` |
+| Waitcnt decode/encode: GFX9 `s_waitcnt` → GFX12 split `s_wait_*` instructions; workgroup_id SGPR→TTMP rewrite | `dbt/semantic_translator.h/.cpp` |
 
 **Tests:**
 - **GFX9 ↔ GFX11 round-trip:** Golden-value round-trip for `vmcnt(0)`, `lgkmcnt(0)`, `expcnt(0)`, combined `vmcnt(15) lgkmcnt(0) expcnt(0)`. Verify GFX9 encoding encodes/decodes for every case.
@@ -5417,9 +5417,8 @@ Phase 16: RDNA translation pairs (post-MVP; decoders done in Phase A)
 - New: `lib/rocjitsu/src/rocjitsu/code/patch/code_object_reader_registry.h/.cpp` — reader handle → ELF bytes
 - `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/cdna3/operand_types.h`
 - `lib/rocjitsu/src/rocjitsu/code/dbt/binary_translator.h/.cpp` — ISA-agnostic translation loop using `EncodingTranslateFn`/`LegalizationLookupFn` function pointers; guest/host terminology
-- `lib/rocjitsu/src/rocjitsu/code/dbt/semantic_translator.h` — `SemanticRule`, `SemanticAnchor`, `SemanticMatch`, `SemanticTranslator` class (§3.3.3)
-- `lib/rocjitsu/src/rocjitsu/code/dbt/semantic_rules_cdna4_to_rdna4.h` — MFMA→WMMA semantic rules for CDNA4→RDNA4 pair
-- `lib/rocjitsu/src/rocjitsu/code/dbt/waitcnt_translator.h/.cpp` — GFX9 `s_waitcnt` → GFX12 split `s_wait_*` with code cave expansion
+- `lib/rocjitsu/src/rocjitsu/code/dbt/semantic_translator.h/.cpp` — `SemanticRule`, `SemanticTranslator` class; waitcnt GFX9→GFX12 splitting; workgroup_id SGPR→TTMP rewrite
+- `lib/rocjitsu/src/rocjitsu/code/dbt/instruction_lowering.h` — `try_lower_expand()` for instructions without target ISA equivalents (v_lshl_add_u64 etc.)
 - `lib/rocjitsu/src/rocjitsu/code/dbt/rj_code_translate.cpp` — `rj_code_translate()` C API implementation
 - `lib/rocjitsu/src/rocjitsu/code/patch/code_object_patcher.h/.cpp` — ELF read/modify/emit with code cave support
 - `lib/rocjitsu/src/rocjitsu/code/rj_code_internal.h` — shared internal header for opaque handle structs

@@ -90,9 +90,11 @@ struct TranslatedCodeObject {
 class BinaryTranslator {
 public:
   /// @brief Construct a translator for the given (guest, host) ISA pair.
-  /// @param guest_arch  Source ISA architecture.
-  /// @param host_arch   Target ISA architecture.
-  BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
+  /// @param guest_arch    Source ISA architecture.
+  /// @param host_arch     Target ISA architecture.
+  /// @param target_mach   EF_AMDGPU_MACH value for the target GPU stepping.
+  ///                      0 = auto-detect from host_arch (default GFX1200 for RDNA4).
+  BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach = 0);
   ~BinaryTranslator();
 
   /// @brief Translate a decoded code object.
@@ -125,10 +127,11 @@ private:
   /// @param text       The translated text buffer.
   /// @param dst_opcode Target opcode from the legalization table.
   void handle_encoding(const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text,
-                       uint16_t dst_opcode);
+                       uint16_t dst_opcode, CodeObjectPatcher &patcher);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
   rj_code_arch_t host_arch_;                                ///< Target ISA.
+  uint32_t target_mach_;                                    ///< ELF MACH flag for target stepping.
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.

@@ -362,6 +362,8 @@ inline TranslationResult encode_flat_rdna4(const FlatFields &f, uint16_t dst_op)
   dst.vdst = f.vdst;
   dst.nv = 0;
   dst.sve = 0;
+  if (dst.saddr == 0x7F)
+    dst.saddr = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{3};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -382,6 +384,8 @@ inline TranslationResult encode_flat_glbl_rdna4(const FlatGlblFields &f, uint16_
   dst.saddr = f.saddr;
   dst.vdst = f.vdst;
   dst.nv = 0;
+  if (dst.saddr == 0x7F)
+    dst.saddr = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{3};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -402,6 +406,8 @@ inline TranslationResult encode_flat_scratch_rdna4(const FlatScratchFields &f, u
   dst.saddr = f.saddr;
   dst.vdst = f.vdst;
   dst.nv = 0;
+  if (dst.saddr == 0x7F)
+    dst.saddr = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{3};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -425,6 +431,8 @@ inline TranslationResult encode_mubuf_rdna4(const MubufFields &f, uint16_t dst_o
   dst.nv = 0;
   dst.tfe = 0;
   dst.format = 0;
+  if (dst.soffset == 0x7F)
+    dst.soffset = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{3};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -443,6 +451,10 @@ inline TranslationResult encode_smem_rdna4(const SmemFields &f, uint16_t dst_op)
   dst.nv = f.nv;
   dst.ioffset = f.ioffset & 0xFFFFFF;
   dst.soffset = f.soffset;
+  if (dst.soffset == 0x7F)
+    dst.soffset = 0x7C;
+  if (f.soffset_en == 0)
+    dst.soffset = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));

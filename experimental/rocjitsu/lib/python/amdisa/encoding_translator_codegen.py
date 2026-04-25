@@ -485,6 +485,15 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
             lines.append(f'    dst.{m.dst_name} = 0;')
         # drop and coherency: nothing to encode
 
+    # Remap null register sentinels: CDNA uses 0x7F (7-bit max), RDNA uses 0x7C.
+    if any(m.src_name == 'saddr' or m.dst_name == 'saddr' for m in trans.mappings):
+        lines.append('    if (dst.saddr == 0x7F) dst.saddr = 0x7C;')
+    if any(m.src_name == 'soffset' or m.dst_name == 'soffset' for m in trans.mappings):
+        lines.append('    if (dst.soffset == 0x7F) dst.soffset = 0x7C;')
+        # CDNA SMEM uses soffset_en=0 to disable scalar offset. RDNA uses soffset=0x7C (null).
+        if any(m.src_name == 'soffset_en' for m in trans.mappings):
+            lines.append('    if (f.soffset_en == 0) dst.soffset = 0x7C;')
+
     # Return
     if bit_cnt <= 32:
         lines.append(f'    return TranslationResult{{{{std::bit_cast<uint32_t>(dst), 0u, 0u}}, uint8_t{{1}}}};')
