@@ -83,6 +83,7 @@ struct formatter<hsa_kernel_dispatch_packet_t>
     }
 };
 
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
 template <>
 struct formatter<hsa_amd_ext_perf_hint_t>
 {
@@ -143,6 +144,7 @@ struct formatter<hsa_amd_ext_kernel_dispatch_packet_t>
                               pkt.completion_signal.handle);
     }
 };
+#endif
 
 template <>
 struct formatter<hsa_barrier_and_packet_t>
@@ -218,11 +220,12 @@ struct formatter<rocprofiler::hsa::rocprofiler_packet>
         switch(t)
         {
             case 0:
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
                 // Vendor specific packet - check AMD format
                 if(pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
                     return fmt::format_to(ctx.out(), "{}", pkt.ext_kernel_dispatch);
-                else
-                    return fmt::format_to(ctx.out(), "{}", pkt.ext_amd_aql_pm4);
+#endif
+                return fmt::format_to(ctx.out(), "{}", pkt.ext_amd_aql_pm4);
             case 2:
                 // Kernel dispatch
                 return fmt::format_to(ctx.out(), "{}", pkt.kernel_dispatch);

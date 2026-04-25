@@ -68,9 +68,11 @@ static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
 static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_barrier_or_packet_t, completion_signal),
               "unexpected ABI incompatibility");
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
 static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_amd_ext_kernel_dispatch_packet_t, completion_signal),
               "unexpected ABI incompatibility");
+#endif
 
 namespace rocprofiler
 {
@@ -353,6 +355,7 @@ WriteInterceptor(const void* packets,
         {
             ++num_dispatch_packets;
         }
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
         else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
         {
             const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
@@ -361,6 +364,7 @@ WriteInterceptor(const void* packets,
                 ++num_dispatch_packets;
             }
         }
+#endif
     }
 
     if(num_dispatch_packets == 0)
@@ -452,6 +456,7 @@ WriteInterceptor(const void* packets,
             bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
             bool is_ext_kernel_dispatch = false;
 
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
             if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
             {
                 const auto& ext_packet = _packets[i].ext_kernel_dispatch;
@@ -460,6 +465,7 @@ WriteInterceptor(const void* packets,
                     is_ext_kernel_dispatch = true;
                 }
             }
+#endif
 
             if(!is_kernel_dispatch && !is_ext_kernel_dispatch)
             {
@@ -496,6 +502,7 @@ WriteInterceptor(const void* packets,
                     rocprofiler_dim3_t grid_size;
                 };
 
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
                 if(is_ext)
                 {
                     const auto& e = pkt.ext_kernel_dispatch;
@@ -514,7 +521,9 @@ WriteInterceptor(const void* packets,
                                             static_cast<uint32_t>(e.cluster_size_z) *
                                             static_cast<uint32_t>(e.workgroup_size_z)}};
                 }
-                else
+#else
+                (void) is_ext;
+#endif
                 {
                     const auto& s = pkt.kernel_dispatch;
                     return packet_info{s.completion_signal,
@@ -539,10 +548,12 @@ WriteInterceptor(const void* packets,
             // create our own signal that we can get a callback on. if there is an original
             // completion signal we will create a barrier packet, assign the original completion
             // signal that that barrier packet, and add it right after the kernel packet
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
             if(is_ext_kernel_dispatch)
                 _packet_data.pooled_signal = queue.create_signal(
                     0, &kernel_packet.ext_kernel_dispatch.completion_signal, true);
             else
+#endif
                 _packet_data.pooled_signal =
                     queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
 
