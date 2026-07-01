@@ -12,6 +12,7 @@
 #include "hip_executionctx.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
+#include "hip_event.hpp"  // full ihipIpcEventShmem_t for deferred emulated-IPC cleanup (#7520)
 
 #undef hipGetDeviceProperties
 #undef hipDeviceProp_t
@@ -137,6 +138,7 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 void Device::Reset() {
   // Free any deferred IPC-event signals before tearing the device down.
   DrainDeferredIpcSignals();
+  DrainDeferredIpcEmulated();
   {
     std::scoped_lock lock(lock_);
     auto pools_to_delete = std::exchange(mem_pools_, {});
@@ -288,6 +290,7 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   // All of this device's work has been waited on, so the deferred IPC signals' barriers are
   // complete; freeing them here won't block.
   DrainDeferredIpcSignals();
+  DrainDeferredIpcEmulated();
 }
 
 // ================================================================================================
@@ -335,6 +338,55 @@ void Device::DrainDeferredIpcSignals() {
   }
   for (const auto& item : pending) {
     CleanupDeferredIpcSignal(item);
+  }
+}
+
+// ================================================================================================
+// Emulated (POSIX shm-backed) IPC event deferred cleanup (rocm-systems#7520).
+void Device::CleanupDeferredIpcEmulated(const DeferredIpcEmulated& item) {
+  if (item.shmem == nullptr) {
+    return;
+  }
+  // ihipHostUnregister() internally drains all pending device work (SyncAllStreams()); doing it
+  // here, at a device-wide drain point, is exactly where that cost is expected to be paid.
+  ihipHostUnregister(&item.shmem->signal);
+  if (!amd::Os::MemoryUnmapFile(item.shmem, sizeof(hip::ihipIpcEventShmem_t))) {
+    // print hipErrorInvalidHandle;
+  }
+  // Only the last owner removes the shm name; earlier destroys must leave it for peers.
+  if (item.owners_after == 0) {
+    amd::Os::shm_unlink(item.ipc_name);
+  }
+}
+
+// ================================================================================================
+void Device::EnqueueDeferredIpcEmulated(ihipIpcEventShmem_s* shmem, const std::string& ipc_name,
+                                        int owners_after) {
+  std::vector<DeferredIpcEmulated> overflow;
+  {
+    std::scoped_lock lock(deferredIpcLock_);
+    if (deferredIpcEmulated_.empty()) {
+      deferredIpcEmulated_.reserve(kDeferredIpcDrainThreshold);
+    }
+    deferredIpcEmulated_.push_back({shmem, ipc_name, owners_after});
+    if (deferredIpcEmulated_.size() >= kDeferredIpcDrainThreshold) {
+      overflow.swap(deferredIpcEmulated_);  // bounded: drain inline on overflow
+    }
+  }
+  for (const auto& item : overflow) {
+    CleanupDeferredIpcEmulated(item);
+  }
+}
+
+// ================================================================================================
+void Device::DrainDeferredIpcEmulated() {
+  std::vector<DeferredIpcEmulated> pending;
+  {
+    std::scoped_lock lock(deferredIpcLock_);
+    pending.swap(deferredIpcEmulated_);
+  }
+  for (const auto& item : pending) {
+    CleanupDeferredIpcEmulated(item);
   }
 }
 
@@ -402,6 +454,7 @@ Device::~Device() {
   // Free any IPC signals still queued for deferred cleanup (e.g. events destroyed without a
   // subsequent device sync) so they don't leak when the device goes away.
   DrainDeferredIpcSignals();
+  DrainDeferredIpcEmulated();
 
   if ((IS_LINUX || !DEBUG_HIP_MEM_POOL_VMHEAP) && (default_mem_pool_ != nullptr)) {
     default_mem_pool_->release();

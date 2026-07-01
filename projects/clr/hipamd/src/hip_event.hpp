@@ -211,6 +211,9 @@ class IPCEventEmulated : public Event {
  public:
   explicit IPCEventEmulated(uint32_t flags = hipEventInterprocess) : Event(flags) {}
   ~IPCEventEmulated() override {
+#if defined(_MSC_VER)
+    // Windows/PAL path: keep the original inline cleanup unchanged. There is no ROCr IPC
+    // signal path here, and the deferred-cleanup rework is scoped to POSIX only.
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
       // Make sure event is synchronized
@@ -223,11 +226,28 @@ class IPCEventEmulated : public Event {
         amd::Os::shm_unlink(ipc_evt_.ipc_name_);
       }
     }
-#if !defined(_MSC_VER)
-    // Clean up the POSIX shared memory object
-    if (!ipc_evt_.ipc_name_.empty()) {
-      shm_unlink(ipc_evt_.ipc_name_.c_str());
+#else
+    // POSIX path: defer the physical IPC cleanup out of the user-visible destroy path.
+    //
+    // The physical teardown (ihipHostUnregister -> Device::SyncAllStreams() drains ALL
+    // pending device work, MemoryUnmapFile, and shm_unlink) must not run inline here: doing
+    // so makes hipEventDestroy() block for the full duration of unrelated device work, even
+    // when this event is already complete (see rocm-systems#7520). Instead, decrement the
+    // owners counter, hand the physical resources to the device's deferred-cleanup queue,
+    // and clear our handle so nothing is touched again. The queue is drained only at points
+    // where a device-wide wait is already expected (hipDeviceSynchronize / hipDeviceReset /
+    // device teardown), matching CUDA's deferred cudaEventDestroy() semantics.
+    if (ipc_evt_.ipc_shmem_ != nullptr) {
+      int owners = --ipc_evt_.ipc_shmem_->owners;
+      g_devices[deviceId()]->EnqueueDeferredIpcEmulated(ipc_evt_.ipc_shmem_, ipc_evt_.ipc_name_,
+                                                        owners);
+      ipc_evt_.ipc_shmem_ = nullptr;
+      ipc_evt_.ipc_name_.clear();
     }
+    // NOTE: the previously-unconditional shm_unlink() that ran here (even when owners > 0 or
+    // ipc_shmem_ was null) has been removed; it could remove the shm name while another
+    // process still held it, breaking open-by-name IPC. The owners == 0 unlink inside the
+    // deferred cleanup is correct and sufficient.
 #endif
   }
   bool createIpcEventShmemIfNeeded();

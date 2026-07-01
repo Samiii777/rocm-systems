@@ -360,6 +360,7 @@ namespace hip {
   class MemoryPool;
   class Event;
   class ExecutionCtx;
+  struct ihipIpcEventShmem_s;  // fwd-decl for Device deferred emulated-IPC cleanup (#7520)
   class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
@@ -612,6 +613,20 @@ namespace hip {
     /// Wait for the pending barriers of all deferred IPC signals on this device and free them.
     void DrainDeferredIpcSignals();
 
+    // --- Emulated (POSIX shm-backed) IPC event deferred cleanup (rocm-systems#7520) ---
+    // The emulated IPC event (used when ROCr IPC signals are unavailable) is backed by a
+    // POSIX shared-memory object whose physical teardown calls ihipHostUnregister(), which
+    // internally drains ALL pending device work via SyncAllStreams(). Running that inline in
+    // ~IPCEventEmulated() makes hipEventDestroy() block for the full duration of unrelated
+    // device work. Defer it to the same drain points as the ROCr signal path above.
+    /// Hand an emulated IPC event's shared-memory object to this device's deferred-cleanup
+    /// queue. owners_after is the owners count AFTER this destroy decremented it; the shm
+    /// name is unlinked only when it reaches zero. Frees inline if the queue exceeds its bound.
+    void EnqueueDeferredIpcEmulated(ihipIpcEventShmem_s* shmem, const std::string& ipc_name,
+                                    int owners_after);
+    /// Unregister/unmap all deferred emulated IPC shared-memory objects on this device.
+    void DrainDeferredIpcEmulated();
+
     // --- Device activity ---
 
     void SetActiveStatus() { isActive_.store(true, std::memory_order_release); }
@@ -698,6 +713,15 @@ namespace hip {
     /// Drain inline once the queue reaches this many entries, bounding memory if an app
     /// destroys many IPC events without an intervening device sync.
     static constexpr size_t kDeferredIpcDrainThreshold = 256;
+
+    struct DeferredIpcEmulated {
+      ihipIpcEventShmem_s* shmem;   //!< POSIX shm-backed IPC event object to unregister/unmap
+      std::string ipc_name;         //!< shm name; unlinked only when owners_after == 0
+      int owners_after;             //!< owners count after the owning destroy decremented it
+    };
+    /// Physically unregister/unmap an emulated IPC shm object (and unlink if owners hit 0).
+    static void CleanupDeferredIpcEmulated(const DeferredIpcEmulated& item);
+    std::vector<DeferredIpcEmulated> deferredIpcEmulated_; //!< Emulated IPC objs awaiting cleanup
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).
