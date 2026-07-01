@@ -68,7 +68,35 @@ amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string& path, const char* bdf) {
   return AMDSMI_STATUS_NOT_FOUND;
 }
 
-// Determine via kfd whether pid uses specified gpu
+// Determine via kfd whether pid uses the gpu identified by an already-known
+// KFD gpu id (target_gid). This is the fast path: it does NOT walk the KFD
+// topology (DiscoverKFDNodes), because the caller already holds the id (e.g.
+// via AMDSmiGPUDevice::get_kfd_gpu_id()). See issue #7920.
+amdsmi_status_t gpu_is_in_kfd_pid_by_id(uint64_t target_gid, long pid) {
+  // A gpu id of 0 is a CPU node / unknown; nothing to match.
+  if (target_gid == 0) {
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+
+  // Get all KFD GPU ids for pid
+  std::unordered_set<uint64_t> pid_gids;
+  int ret = amd::smi::GetKfdGpuIdsForPid(pid, &pid_gids);
+  if (ret != 0) {
+    if (ret == EACCES) {
+      return AMDSMI_STATUS_NO_PERM;
+    }
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+
+  // Return success if gpu id is in pid gpu ids
+  return (pid_gids.count(target_gid) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_FOUND);
+}
+
+// Determine via kfd whether pid uses specified gpu.
+// Slow path: translates the device BDF into its KFD gpu id by walking the KFD
+// topology. Prefer gpu_is_in_kfd_pid_by_id(uint64_t, long) when the
+// caller already knows the KFD gpu id to avoid a redundant topology walk per
+// process (issue #7920).
 amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t& bdf, long pid) {
   // pack (domain,bus,device,function) to the same 64-bit key
   // (DOMAIN << 32) | (BUS << 8) | (DEVICE << 3) | FUNCTION
@@ -97,28 +125,27 @@ amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t& bdf, long pid) {
     return AMDSMI_STATUS_NOT_FOUND;
   }
 
-  // Grab gpu id and ensure not cpu
+  // Grab gpu id and ensure not cpu, then reuse the id-based fast path.
   const uint64_t target_gid = it->second->gpu_id();
-  if (target_gid == 0) {
-    return AMDSMI_STATUS_NOT_FOUND;
-  }
-
-  // Get all KFD GPU ids for pid
-  std::unordered_set<uint64_t> pid_gids;
-  ret = amd::smi::GetKfdGpuIdsForPid(pid, &pid_gids);
-  if (ret != 0) {
-    if (ret == EACCES) {
-      return AMDSMI_STATUS_NO_PERM;
-    }
-    return AMDSMI_STATUS_NOT_FOUND;
-  }
-
-  // Return success if gpu id is in pid gpu ids
-  return (pid_gids.count(target_gid) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_FOUND);
+  return gpu_is_in_kfd_pid_by_id(target_gid, pid);
 }
 
+// Forward declaration of the id-aware entry point (defined below).
+amdsmi_status_t gpuvsmi_get_pid_info_with_id(const amdsmi_bdf_t& bdf, uint64_t kfd_gpu_id,
+                                             long int pid, amdsmi_proc_info_t& info);
+
+// Backward-compatible entry point: KFD gpu id is unknown, so pass 0 which
+// forces the slow BDF-based topology lookup inside the id-aware overload.
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
                                      amdsmi_proc_info_t& info) {
+  return gpuvsmi_get_pid_info_with_id(bdf, /*kfd_gpu_id=*/0, pid, info);
+}
+
+// Id-aware entry point. When kfd_gpu_id is non-zero the caller already knows
+// the device's KFD gpu id (e.g. via AMDSmiGPUDevice::get_kfd_gpu_id()), so we
+// avoid the per-process KFD topology walk (DiscoverKFDNodes). See issue #7920.
+amdsmi_status_t gpuvsmi_get_pid_info_with_id(const amdsmi_bdf_t& bdf, uint64_t kfd_gpu_id,
+                                             long int pid, amdsmi_proc_info_t& info) {
   char bdf_str[13];
   DIR* d;
   struct dirent* dir;
@@ -134,7 +161,10 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
   std::string name_path = "/proc/" + std::to_string(pid) + "/exe";
   std::string cgroup_path = "/proc/" + std::to_string(pid) + "/cgroup";
 
-  amdsmi_status_t ret = gpu_is_in_kfd_pid(bdf, pid);
+  // Prefer the fast path when the KFD gpu id is already known; only fall
+  // back to the BDF-based topology walk when it is unknown (kfd_gpu_id == 0).
+  amdsmi_status_t ret = (kfd_gpu_id != 0) ? gpu_is_in_kfd_pid_by_id(kfd_gpu_id, pid)
+                                          : gpu_is_in_kfd_pid(bdf, pid);
 
   if (ret != AMDSMI_STATUS_SUCCESS) {
     // If kfd process detection fails, fallback on old bdf code

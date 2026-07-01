@@ -34,6 +34,12 @@ extern "C" {
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
                                      amdsmi_proc_info_t& info);
 
+// Id-aware variant: when the caller already knows the device's KFD gpu id,
+// pass it here to avoid a redundant per-process KFD topology walk (issue
+// #7920). A kfd_gpu_id of 0 means "unknown" and falls back to the BDF lookup.
+amdsmi_status_t gpuvsmi_get_pid_info_with_id(const amdsmi_bdf_t& bdf, uint64_t kfd_gpu_id,
+                                             long int pid, amdsmi_proc_info_t& info);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
