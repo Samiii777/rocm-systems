@@ -81,6 +81,7 @@
 // libdrm headers
 #include <xf86drm.h>
 #include <amdgpu.h>
+#include <amdgpu_drm.h>
 #endif
 
 #ifdef HSA_ENABLE_AMDCUID_SUPPORT
@@ -2469,6 +2470,27 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       const size_t free_scratch = scratch_cache_.free_bytes();
       const size_t reserved_scratch = scratch_cache_.reserved_bytes();
       availableBytes += free_scratch - std::min(free_scratch, reserved_scratch);
+
+#if defined(__linux__)
+      // KFD's AMDKFD_IOC_AVAILABLE_MEMORY only accounts for ROCm/KFD compute
+      // allocations and ignores DRM graphics allocations (Vulkan/GL/desktop
+      // compositor). On discrete GPUs this over-reports free VRAM by however
+      // much graphics has resident, causing callers that size GPU offload from
+      // this value to over-commit and OOM at load. Cross-check amdgpu's
+      // graphics-inclusive VRAM accounting via the agent's libdrm handle and
+      // take the conservative (smaller) value. APUs share host memory (UMA)
+      // and keep the KFD value.
+      if (!properties_.Integrated && ldrm_dev_ != nullptr) {
+        struct amdgpu_heap_info vram_info = {};
+        if (amdgpu_query_heap_info(ldrm_dev_, AMDGPU_GEM_DOMAIN_VRAM, 0,
+                                   &vram_info) == 0 &&
+            vram_info.heap_size >= vram_info.heap_usage) {
+          const uint64_t drm_available =
+              vram_info.heap_size - vram_info.heap_usage;
+          availableBytes = std::min<uint64_t>(availableBytes, drm_available);
+        }
+      }
+#endif
 
       *((uint64_t*)value) = availableBytes;
       break;
