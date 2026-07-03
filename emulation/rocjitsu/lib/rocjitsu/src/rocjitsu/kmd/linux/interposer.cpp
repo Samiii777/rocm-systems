@@ -1151,6 +1151,16 @@ int fcntl64(int fd, int cmd, ...) {
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+  // Some loader, constructor, or worker-thread initialization paths can call
+  // mmap() before this interposer's constructor has completed and before
+  // LibcPassthrough::resolve() has populated real.mmap. In that window there
+  // cannot be any rocjitsu-owned KFD/DRM fds to intercept yet, so pass the
+  // call straight through to the kernel via the raw syscall instead of jumping
+  // through a null real.mmap function pointer (which would crash in release
+  // builds where the assert() below is a no-op).
+  if (!InterposerContext::real.ready())
+    return reinterpret_cast<void *>(
+        ::syscall(SYS_mmap, addr, length, prot, flags, fd, offset));
   assert(InterposerContext::real.ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);

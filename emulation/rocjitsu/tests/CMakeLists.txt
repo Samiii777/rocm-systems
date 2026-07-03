@@ -1262,3 +1262,31 @@ if(RJ_ENABLE_HIP_TESTS)
             "bin/hip_cvt_narrow_test"
     )
 endif()
+
+# --- Early-mmap preload regression test (rocm-systems #8037) ---
+#
+# Verifies that the KMD interposer's mmap() survives being called before the
+# shim's constructor has resolved its libc passthrough symbols. A tiny helper
+# library calls mmap() from a constructor; when preloaded ahead of the KMD
+# shim (rocjitsu_shared) its constructor runs first, exercising the early
+# window that historically crashed on a null real.mmap. This is a host-only
+# test: it needs no GPU, HIP, or ROCm.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(rj_early_mmap_preload SHARED early_mmap_preload.cpp)
+    rj_configure_target(rj_early_mmap_preload TEST)
+
+    add_executable(early_mmap_preload_main early_mmap_preload_main.cpp)
+    target_link_libraries(early_mmap_preload_main PRIVATE rj_early_mmap_preload)
+    rj_configure_target(early_mmap_preload_main TEST)
+
+    rj_add_test(
+        NAME "KmdInterposer.EarlyMmapDuringInit"
+        COMMAND early_mmap_preload_main
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        ENVIRONMENT
+            # Order matters: the early-mmap helper is listed first so its
+            # constructor runs before the KMD shim's constructor, hitting the
+            # pre-resolve() window.
+            "LD_PRELOAD=$<TARGET_FILE:rj_early_mmap_preload> $<TARGET_FILE:rocjitsu_shared>"
+    )
+endif()
