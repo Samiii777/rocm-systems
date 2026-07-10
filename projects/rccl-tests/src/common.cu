@@ -1112,7 +1112,16 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           const char* protoName = NULL;
           bool fromSymk = false;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-          if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
+          // NCCL_CTA_POLICY_ZERO was only introduced in NCCL 2.28. When building
+          // against an older (2.27-era) NCCL header the macro is undefined, so
+          // only reference it when it exists. On < 2.28 the ZERO policy cannot be
+          // selected anyway, so the condition is effectively always true.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+          const bool notZeroCtaPolicy = (ctaPolicy != NCCL_CTA_POLICY_ZERO);
+#else
+          const bool notZeroCtaPolicy = true;
+#endif
+          if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && notZeroCtaPolicy && rcclTestsGetSymkInfo) {
             if (args->collTest->getSymkInfo) {
               TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
               fromSymk = true;
