@@ -48,6 +48,8 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <algorithm>
+#include <array>
+#include <string_view>
 #include <cstddef>
 #include <cstdint>
 #include <sstream>
@@ -97,6 +99,37 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
         }
     }
     return ret;
+}
+
+// The dispatch/device counting method of sampling hardware performance counters is
+// documented as flaky on gfx115x (Strix/Strix Halo, RDNA3.5) due to an AQLProfile /
+// firmware bug: basic GRBM/SQ/GPU_UTIL counters can read back 0 even when the GPU is
+// active. Tests that assert counter_value > 0 must be skipped on these architectures.
+// See ROCm/rocm-systems #7241 (Skip gpu perf counter tests on gfx1151).
+inline bool
+is_aqlprofile_counter_flaky_gfx(std::string_view name)
+{
+    static constexpr std::array<std::string_view, 6> skip_gfx = {
+        "gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1152", "gfx1153"};
+    for(const auto& itr : skip_gfx)
+    {
+        // agent name may carry a target-id suffix (e.g. "gfx1151:xnack-"), match by prefix
+        if(name.substr(0, itr.size()) == itr) return true;
+    }
+    return false;
+}
+
+// Returns true if any supported GPU agent is one of the architectures where
+// device/dispatch counter collection is known to be flaky (returns 0).
+inline bool
+device_counting_counters_are_flaky()
+{
+    const auto& supported_agents = hsa::get_queue_controller()->get_supported_agents();
+    for(const auto& [_, gpu_agent] : supported_agents)
+    {
+        if(is_aqlprofile_counter_flaky_gfx(gpu_agent.name())) return true;
+    }
+    return false;
 }
 
 void
@@ -688,6 +721,12 @@ TEST(profiler_ioctl_request, version_2_0_uses_mainline_request)
 
 TEST_F(device_counting_service_test, sync_grbm_verify)
 {
+    if(device_counting_counters_are_flaky())
+    {
+        GTEST_SKIP() << "Device/dispatch counter values are unreliable (read 0) on "
+                        "gfx115x due to a known AQLProfile/firmware bug; skipping "
+                        "counter_value > 0 verification.";
+    }
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GRBM_COUNT"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_INFO << local_recs.size();
@@ -705,6 +744,12 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
 
 TEST_F(device_counting_service_test, sync_gpu_util_verify)
 {
+    if(device_counting_counters_are_flaky())
+    {
+        GTEST_SKIP() << "Device/dispatch counter values are unreliable (read 0) on "
+                        "gfx115x due to a known AQLProfile/firmware bug; skipping "
+                        "counter_value > 0 verification.";
+    }
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GPU_UTIL"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_INFO << local_recs.size();
@@ -722,6 +767,12 @@ TEST_F(device_counting_service_test, sync_gpu_util_verify)
 
 TEST_F(device_counting_service_test, sync_sq_waves_verify)
 {
+    if(device_counting_counters_are_flaky())
+    {
+        GTEST_SKIP() << "Device/dispatch counter values are unreliable (read 0) on "
+                        "gfx115x due to a known AQLProfile/firmware bug; skipping "
+                        "counter_value > 0 verification.";
+    }
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_INFO << local_recs.size();
@@ -748,6 +799,12 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
     }
 
     ROCP_WARNING << "Running non-intercept test";
+    if(device_counting_counters_are_flaky())
+    {
+        GTEST_SKIP() << "Device/dispatch counter values are unreliable (read 0) on "
+                        "gfx115x due to a known AQLProfile/firmware bug; skipping "
+                        "counter_value > 0 verification.";
+    }
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000, true);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_INFO << local_recs.size();
@@ -765,5 +822,11 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
 
 TEST_F(device_counting_service_test, raw_sq_waves_verify)
 {
+    if(device_counting_counters_are_flaky())
+    {
+        GTEST_SKIP() << "Device/dispatch counter values are unreliable (read 0) on "
+                        "gfx115x due to a known AQLProfile/firmware bug; skipping "
+                        "counter_value > 0 verification.";
+    }
     check_raw_aql_packets("SQ_WAVES_sum", 1000, {1.0});
 }

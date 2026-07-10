@@ -26,10 +26,31 @@ import os
 import sys
 import pytest
 
+# Device/dispatch counter collection is documented as flaky on gfx115x (Strix / Strix
+# Halo, RDNA3.5) due to a known AQLProfile / firmware bug: counter values can read back
+# 0 and no counter_collection records are emitted. See ROCm/rocm-systems #7241.
+COUNTER_FLAKY_GFX = ("gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1152", "gfx1153")
+
+
+def _counters_are_flaky(agent_info_input_data):
+    for row in agent_info_input_data:
+        if row.get("Agent_Type") != "GPU":
+            continue
+        name = row.get("Name", "")
+        if any(name.startswith(gfx) for gfx in COUNTER_FLAKY_GFX):
+            return True
+    return False
+
+
 
 def test_validate_counter_collection_plus_tracing(
-    json_data, counter_input_data, hsa_input_data
+    json_data, counter_input_data, hsa_input_data, agent_info_input_data
 ):
+    if _counters_are_flaky(agent_info_input_data):
+        pytest.skip(
+            "counter_collection is unreliable/empty on gfx115x due to a known "
+            "AQLProfile/firmware bug"
+        )
 
     # check if either kernel-name/FUNCTION is present
     assert (
@@ -105,13 +126,19 @@ def test_validate_counter_collection_plus_tracing_dispatch_data(json_data):
         )
 
 
-def test_perfetto_data(pftrace_data, json_data):
+def test_perfetto_data(pftrace_data, json_data, agent_info_input_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    categories = ["hip", "hsa", "marker", "kernel", "memory_copy", "counter_collection"]
+    if _counters_are_flaky(agent_info_input_data):
+        # counter_collection records are unreliable/empty on gfx115x
+        # (AQLProfile/firmware bug); do not validate that category.
+        categories.remove("counter_collection")
 
     rocprofv3.test_perfetto_data(
         pftrace_data,
         json_data,
-        ("hip", "hsa", "marker", "kernel", "memory_copy", "counter_collection"),
+        tuple(categories),
     )
 
 
