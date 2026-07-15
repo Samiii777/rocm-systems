@@ -62,6 +62,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -275,23 +276,42 @@ bool IsInteger(const std::string& n_str) {
   return (*tmp == 0);
 }
 
+// Diagnostics emitted by handleException() are opt-in and OFF by default.
+//
+// Calling rsmi_init() on a machine that has no ROCm-supported hardware is an
+// expected outcome (e.g. when librocm_smi64 is pulled in as an optional
+// dependency of another library such as hwloc). In that case rsmi_init()
+// already returns RSMI_STATUS_INIT_ERROR to the caller, so unconditionally
+// printing "Exception caught: rsmi_init." to stderr is redundant and alarms
+// users who have no way to disable it (see issue #8612).
+//
+// We therefore only print the exception diagnostic when the user has opted in
+// via the existing RSMI_LOGGING environment variable (any non-empty value),
+// keeping the library silent by default while preserving diagnostics for
+// developers who ask for them. The returned status codes are unchanged.
+static bool exceptionLoggingEnabled() {
+  const char* ev = getenv("RSMI_LOGGING");
+  return (ev != nullptr) && (ev[0] != '\0');
+}
+
 rsmi_status_t handleException() {
+  const bool log = exceptionLoggingEnabled();
   try {
     throw;
   } catch (const std::bad_alloc& e) {
-    debug_print("RSMI exception: BadAlloc\n");
+    if (log) debug_print("RSMI exception: BadAlloc\n");
     return RSMI_STATUS_OUT_OF_RESOURCES;
   } catch (const amd::smi::rsmi_exception& e) {
-    debug_print("Exception caught: %s.\n", e.what());
+    if (log) debug_print("Exception caught: %s.\n", e.what());
     return e.error_code();
   } catch (const std::exception& e) {
-    debug_print("Exception caught: %s\n", e.what());
+    if (log) debug_print("Exception caught: %s\n", e.what());
     return RSMI_STATUS_INTERNAL_EXCEPTION;
   } catch (const std::nested_exception& e) {
-    debug_print("Callback threw.\n");
+    if (log) debug_print("Callback threw.\n");
     return RSMI_STATUS_INTERNAL_EXCEPTION;
   } catch (...) {
-    debug_print("Unknown exception caught.\n");
+    if (log) debug_print("Unknown exception caught.\n");
     return RSMI_STATUS_INTERNAL_EXCEPTION;
   }
 }
