@@ -561,6 +561,41 @@ TEST(LoaderAPITest, LoadCodeObject_ArchitecturePriority) {
   kpack_free_code_object(code_object);
 }
 
+TEST(LoaderAPITest, LoadCodeObject_PerDeviceHeterogeneous) {
+  std::string assets_dir = get_test_assets_dir();
+  if (assets_dir.empty()) {
+    GTEST_SKIP() << "ROCM_KPACK_TEST_ASSETS_DIR not set";
+  }
+
+  CacheGuard cache;
+  ASSERT_EQ(kpack_cache_create(cache.ptr()), KPACK_SUCCESS);
+
+  auto metadata = make_hipk_metadata("lib/libtest.so", {"test_noop.kpack"});
+  std::string binary_path = assets_dir + "/fake_binary.so";
+
+  // A heterogeneous device set is served by querying each device's own
+  // architecture individually. Each query must return that architecture's
+  // code object, not just the first device's.
+  const char* device_archs[] = {"gfx906", "gfx900"};
+  const char* expected[] = {"KERNEL2_GFX906_DATA", "KERNEL1_GFX900_DATA"};
+
+  for (size_t i = 0; i < 2; ++i) {
+    const char* arch_list[] = {device_archs[i]};
+    void* code_object = nullptr;
+    size_t size = 0;
+
+    kpack_error_t err =
+        kpack_load_code_object(cache.get(), metadata.data(), binary_path.c_str(),
+                               0, arch_list, 1, &code_object, &size);
+
+    ASSERT_EQ(err, KPACK_SUCCESS);
+    ASSERT_NE(code_object, nullptr);
+    EXPECT_EQ(std::memcmp(code_object, expected[i], 19), 0);
+
+    kpack_free_code_object(code_object);
+  }
+}
+
 TEST(LoaderAPITest, LoadCodeObject_ArchNotFound) {
   std::string assets_dir = get_test_assets_dir();
   if (assets_dir.empty()) {
