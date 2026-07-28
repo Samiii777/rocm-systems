@@ -800,7 +800,13 @@ void Buffer::destroy() {
 
     if (needUnlockHostMem) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-        if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
+        if (dev().agent_profile() != HSA_PROFILE_FULL) {
+          // Route through the refcounted registry so a concurrent transient pin over the same
+          // host range on another device keeps the mapping resident until its copy retires.
+          if (!dev().hostUnlock(owner()->getHostMem())) {
+            Hsa::memory_unlock(owner()->getHostMem());
+          }
+        }
       }
     }
   }

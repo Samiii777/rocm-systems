@@ -54,8 +54,10 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #define OPENCL_VERSION_STR XSTR(OPENCL_MAJOR) "." XSTR(OPENCL_MINOR)
@@ -2270,7 +2272,30 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
   return ptr;
 }
 
+namespace {
+// Process-wide refcount for transient host pins. hsa_amd_memory_unlock() tears down the KFD
+// userptr mapping for every GPU node the range was made resident on, so an early unlock from one
+// device's completed copy would fault another device's in-flight SDMA reading the same host
+// buffer. Refcounting the lock by aligned host base pointer keeps the mapping alive until the last
+// outstanding pin over that range is released.
+struct HostPinRef {
+  void* device_memory;
+  uint32_t count;
+};
+std::mutex host_pin_lock;
+std::unordered_map<void*, HostPinRef> host_pin_refs;
+}  // namespace
+
 void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment) const {
+  {
+    std::lock_guard<std::mutex> guard(host_pin_lock);
+    auto it = host_pin_refs.find(hostMem);
+    if (it != host_pin_refs.end()) {
+      it->second.count++;
+      return it->second.device_memory;
+    }
+  }
+
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
@@ -2287,9 +2312,32 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
   if (status != HSA_STATUS_SUCCESS) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_LOCK,
              "Failed to lock memory to pool, failed with hsa_status: %d", status);
-    deviceMemory = nullptr;
+    return nullptr;
+  }
+
+  std::lock_guard<std::mutex> guard(host_pin_lock);
+  auto res = host_pin_refs.emplace(hostMem, HostPinRef{deviceMemory, 1});
+  if (!res.second) {
+    // Another thread locked the same base pointer while we were registering; keep the first
+    // mapping and drop ours to avoid leaking a redundant KFD registration.
+    res.first->second.count++;
+    Hsa::memory_unlock(hostMem);
+    return res.first->second.device_memory;
   }
   return deviceMemory;
+}
+
+bool Device::hostUnlock(void* hostMem) const {
+  std::lock_guard<std::mutex> guard(host_pin_lock);
+  auto it = host_pin_refs.find(hostMem);
+  if (it == host_pin_refs.end()) {
+    return false;
+  }
+  if (--it->second.count == 0) {
+    host_pin_refs.erase(it);
+    Hsa::memory_unlock(hostMem);
+  }
+  return true;
 }
 
 void Device::hostFree(void* ptr, size_t size) const { memFree(ptr, size); }

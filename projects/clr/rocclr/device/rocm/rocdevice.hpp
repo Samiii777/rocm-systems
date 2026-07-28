@@ -547,6 +547,12 @@ class Device : public NullDevice {
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
 
+  //! Unpin a host pointer previously pinned by hostLock(). The pin is refcounted per aligned
+  //! page range across the whole process, so the underlying ROCr userptr mapping is only torn
+  //! down once the last outstanding pin over that range is released. Returns true when the
+  //! pointer was tracked and its refcount was decremented (the actual unlock may be deferred).
+  bool hostUnlock(void* hostMem) const;
+
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
 
