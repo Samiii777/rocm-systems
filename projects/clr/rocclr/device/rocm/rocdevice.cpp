@@ -2289,6 +2289,9 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
   return ptr;
 }
 
+std::mutex Device::host_lock_map_lock_;
+std::unordered_map<void*, uint32_t> Device::host_lock_refcount_;
+
 void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
@@ -2307,8 +2310,30 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_LOCK,
              "Failed to lock memory to pool, failed with hsa_status: %d", status);
     deviceMemory = nullptr;
+  } else {
+    // Track the lock so a matching hostUnlock() defers the actual
+    // hsa_amd_memory_unlock() until the last outstanding pin of this host range
+    // is gone. Overlapping transient pins from different devices register the
+    // same base pointer; unlocking it while a peer copy is in flight faults.
+    std::lock_guard<std::mutex> guard(host_lock_map_lock_);
+    ++host_lock_refcount_[hostMem];
   }
   return deviceMemory;
+}
+
+void Device::hostUnlock(void* hostMem) const {
+  {
+    std::lock_guard<std::mutex> guard(host_lock_map_lock_);
+    auto it = host_lock_refcount_.find(hostMem);
+    if (it != host_lock_refcount_.end()) {
+      if (--it->second != 0) {
+        // Another pin of the same host range is still live; defer the unlock.
+        return;
+      }
+      host_lock_refcount_.erase(it);
+    }
+  }
+  Hsa::memory_unlock(hostMem);
 }
 
 void Device::hostFree(void* ptr, size_t size) const { memFree(ptr, size); }

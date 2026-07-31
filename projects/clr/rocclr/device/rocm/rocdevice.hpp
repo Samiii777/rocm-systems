@@ -30,6 +30,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 /*! \addtogroup HSA
@@ -548,6 +549,12 @@ class Device : public NullDevice {
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
 
+  //! Release a host pointer previously pinned by hostLock(). The underlying
+  //! hsa_amd_memory_unlock() is deferred until the last outstanding lock of the
+  //! same aligned host range is released, so a concurrent copy on another device
+  //! cannot lose its mapping mid-transfer.
+  void hostUnlock(void* hostMem) const;
+
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
 
@@ -733,6 +740,14 @@ class Device : public NullDevice {
   uint32_t preferred_numa_node_;
   std::vector<hsa_agent_t> p2p_agents_;   //!< List of P2P agents available for this device
   mutable std::mutex lock_allow_access_;  //!< To serialize allow_access calls
+
+  //! Refcount of outstanding hostLock() pins keyed by aligned host base pointer,
+  //! shared across all devices. hsa_amd_memory_unlock() deregisters a userptr by
+  //! base pointer, so overlapping transient pins of the same host range from
+  //! different devices must share one registration and only deregister once the
+  //! last pin is released; otherwise a peer device's in-flight SDMA copy faults.
+  static std::mutex host_lock_map_lock_;
+  static std::unordered_map<void*, uint32_t> host_lock_refcount_;
   hsa_agent_t bkendDevice_;
   uint32_t pciDeviceId_;
   hsa_agent_t* p2p_agents_list_ = nullptr;
