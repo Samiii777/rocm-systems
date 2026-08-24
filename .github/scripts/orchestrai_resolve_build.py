@@ -21,7 +21,9 @@ Usage:
 
 Env:
     GH_TOKEN            token for the GitHub API (github.token is enough)
-    GITHUB_REPOSITORY   owner/repo the source workflow belongs to
+    GITHUB_REPOSITORY   this repo; the default source of the builds
+    ORCHESTRAI_SOURCE_REPOSITORY  read builds from another repo instead
+                        (set to ROCm/rocm-systems when testing from a fork)
     SOURCE_RUN_ID       optional: pin an explicit run id instead of scanning
     PLATFORMS           optional: comma-separated platform filter
 
@@ -162,8 +164,25 @@ def candidate_runs(cfg: dict[str, Any], repo: str, token: str) -> list[dict[str,
     return [run for run in runs if run.get("status") != "queued"][:limit]
 
 
-def run_summary(cfg: dict[str, Any], run: dict[str, Any], platform: str) -> dict:
+def source_repository(cfg: dict[str, Any]) -> str:
+    """Repo whose Multi-Arch CI runs we read.
+
+    Normally this repo. A fork has no Multi-Arch CI history of its own, so a test
+    run there sets ORCHESTRAI_SOURCE_REPOSITORY=ROCm/rocm-systems and reads the
+    real builds. Env wins over config so the committed file never has to change.
+    """
+    return (
+        os.environ.get("ORCHESTRAI_SOURCE_REPOSITORY")
+        or (cfg.get("source_build") or {}).get("repository")
+        or os.environ.get("GITHUB_REPOSITORY", "")
+    )
+
+
+def run_summary(
+    cfg: dict[str, Any], run: dict[str, Any], platform: str, repo: str
+) -> dict:
     return {
+        "repository": repo,
         "run_id": str(run["id"]),
         "run_url": run.get("html_url", ""),
         "sha": run.get("head_sha", ""),
@@ -192,7 +211,7 @@ def resolve(
                     file=sys.stderr,
                 )
                 continue
-            resolved[platform] = run_summary(cfg, run, platform) | {
+            resolved[platform] = run_summary(cfg, run, platform, repo) | {
                 "families": families
             }
         return resolved
@@ -218,7 +237,7 @@ def resolve(
                     file=sys.stderr,
                 )
                 continue
-            resolved[platform] = run_summary(cfg, run, platform) | {
+            resolved[platform] = run_summary(cfg, run, platform, repo) | {
                 "families": families
             }
             break
@@ -273,9 +292,13 @@ def main() -> None:
     )
 
     cfg = load_config(args.config)
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    repo = source_repository(cfg)
     if not repo:
-        print("::error::GITHUB_REPOSITORY is not set", file=sys.stderr)
+        print(
+            "::error::no source repository — set ORCHESTRAI_SOURCE_REPOSITORY, "
+            "source_build.repository, or GITHUB_REPOSITORY",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     resolved = resolve(cfg, repo, os.environ.get("GH_TOKEN", ""), platforms)

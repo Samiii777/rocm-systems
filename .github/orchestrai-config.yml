@@ -47,6 +47,14 @@ source_build:
   workflow: "therock-multi-arch-ci.yml"
   branch: "develop"
 
+  # Repo that runs the workflow above. Empty = this repo, which is what we want
+  # once this lands on ROCm/rocm-systems. Set the ORCHESTRAI_SOURCE_REPOSITORY
+  # repo variable to "ROCm/rocm-systems" when running from a FORK, so a test run
+  # reads the real builds instead of the fork's (empty) workflow history. Using a
+  # variable rather than editing this line keeps a fork's branch byte-identical
+  # to what eventually merges.
+  repository: ""
+
   # How far back to look for a usable run. The build jobs of a Multi-Arch CI run
   # frequently succeed while some downstream test job fails, so the run's overall
   # conclusion is NOT a useful signal — a run is usable when its artifacts exist.

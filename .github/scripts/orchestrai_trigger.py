@@ -205,9 +205,11 @@ def make_plan(
     machines_per_hw_group: int,
     git_ref: str,
     git_sha: str,
-    repo: str,
 ) -> dict[str, Any]:
     platform = batch["platform"]
+    # The repo the build came from — not necessarily the repo running this
+    # workflow (a fork test run reads ROCm/rocm-systems builds).
+    repo = batch["run_repo"]
     suites_cfg = cfg["suites"]
     run_settings = cfg["run_settings"]
 
@@ -252,7 +254,7 @@ def make_plan(
 
 
 def make_builds(
-    batch: dict[str, Any], cfg: dict[str, Any], repo: str
+    batch: dict[str, Any], cfg: dict[str, Any]
 ) -> tuple[dict[str, Any], list[str]]:
     """Return (builds, missing) — missing names unset required provisioning."""
     platform = batch["platform"]
@@ -264,7 +266,7 @@ def make_builds(
     # install_rocm_from_artifacts.py on the machine.
     build_vars = {
         "THEROCK_RUN_ID": batch["run_id"],
-        "THEROCK_RUN_REPO": repo,
+        "THEROCK_RUN_REPO": batch["run_repo"],
         "THEROCK_AMDGPU_FAMILY": batch["family"],
         "THEROCK_ARTIFACT_BASE_URL": batch["artifact_base_url"],
     }
@@ -408,7 +410,6 @@ def main() -> None:
     batches = json.loads(os.environ.get("BATCHES_JSON") or "{}")
     git_ref = os.environ.get("GIT_REF", "")
     git_sha = os.environ.get("GIT_SHA", "")
-    repo = os.environ.get("GITHUB_REPOSITORY", "ROCm/rocm-systems")
     user = os.environ.get("ORCHESTRAI_PIPELINE_USER", "")
     token = os.environ.get("ORCHESTRAI_PIPELINE_TOKEN", "")
 
@@ -451,14 +452,14 @@ def main() -> None:
     prepared = []
     provisioning_missing: dict[str, list[str]] = {}
     for batch_id, batch in batches.items():
-        builds, missing = make_builds(batch, cfg, repo)
+        builds, missing = make_builds(batch, cfg)
         if missing:
             provisioning_missing[batch_id] = missing
         prepared.append(
             (
                 batch_id,
                 batch,
-                make_plan(batch, cfg, machines_per_hw_group, git_ref, git_sha, repo),
+                make_plan(batch, cfg, machines_per_hw_group, git_ref, git_sha),
                 builds,
             )
         )

@@ -133,6 +133,7 @@ def build(
                 "family": entry["family"],
                 "tags": sorted(device_to_tags[entry["device"]]),
                 "suites": [],
+                "run_repo": source.get("repository", ""),
                 "run_id": source["run_id"],
                 "run_url": source.get("run_url", ""),
                 "sha": source.get("sha", ""),

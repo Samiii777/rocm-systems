@@ -80,6 +80,11 @@ on:
         required: false
         type: string
         default: "1"
+      dry_run:
+        description: "Plan only: print the pipeline payloads, lease no hardware"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -134,6 +139,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           PLATFORMS: ${{ inputs.platform }}
+          # Empty on ROCm/rocm-systems (builds come from this repo). A fork sets
+          # it to ROCm/rocm-systems so a test run reads the real build history
+          # instead of the fork's empty one.
+          ORCHESTRAI_SOURCE_REPOSITORY: ${{ vars.ORCHESTRAI_SOURCE_REPOSITORY }}
         run: python3 .github/scripts/orchestrai_resolve_build.py
 
       # Written before the matrix/trigger steps run, so "which build was under
@@ -189,12 +198,16 @@ jobs:
           # hosts whose release has an entry.
           ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON: ${{ vars.ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON }}
           ORCHESTRAI_WINDOWS_DRIVER_SOURCE: ${{ secrets.ORCHESTRAI_WINDOWS_DRIVER_SOURCE }}
-        run: python3 .github/scripts/orchestrai_trigger.py
+        # dry_run plans every batch and prints the exact PLAN_JSON / BUILDS_JSON
+        # without POSTing, so the whole workflow can be exercised on a fork
+        # without occupying a machine from the shared fleet.
+        run: python3 .github/scripts/orchestrai_trigger.py ${{ inputs.dry_run && '--dry-run' || '' }}
 
   test:
     name: "${{ matrix.suite }} (${{ matrix.platform }}/${{ matrix.device }})${{ matrix.required && ' ✦' || '' }}"
     needs: resolve-and-trigger
-    if: needs.resolve-and-trigger.outputs.has_entries == 'true'
+    # No pipeline build exists on a dry run, so there is nothing to wait for.
+    if: needs.resolve-and-trigger.outputs.has_entries == 'true' && !inputs.dry_run
     runs-on: ${{ vars.ORCHESTRAI_WAIT_RUNNER || 'ubuntu-latest' }}
     continue-on-error: ${{ !matrix.required }}
     strategy:
