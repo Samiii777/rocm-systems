@@ -105,7 +105,7 @@ suites:
     description: "HIP Catch2 unit tests (projects/hip-tests/catch)"
     test: "L1-whb/hip/{platform}/unit_func-hip_catch2"
     platforms: ["linux"]
-    devices: ["rx7900xt", "rx9070xt"]
+    devices: ["navi3x", "navi4x"]
     required: false
 
   # Placeholders for the suites the language-runtime CQE team is still migrating
@@ -116,14 +116,14 @@ suites:
   #   description: "HIP Catch2 unit tests on Windows"
   #   test: "L1-whb/hip/{platform}/unit_func-hip_catch2"
   #   platforms: ["windows"]
-  #   devices: ["rx7900xt", "rx9070xt"]
+  #   devices: ["navi3x", "navi4x"]
   #   required: false
   #
   # opencl-conformance:
   #   description: "OpenCL CTS subset against the CLR OpenCL runtime"
   #   test: "L1-whb/opencl/{platform}/unit_func-opencl_cts"
   #   platforms: ["linux", "windows"]
-  #   devices: ["rx7900xt", "rx9070xt"]
+  #   devices: ["navi3x", "navi4x"]
   #   required: false
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ suites:
 # Device -> MAAS broker tags. These are internal fleet tag names, so they are
 # NOT committed to this public repo — set them via the ORCHESTRAI_DEVICE_TAGS
 # repo variable as a JSON map, e.g.
-#   {"rx7900xt":["<tag>"],"rx9070xt":["<tag>"],"halo":["<tag>"]}
+#   {"navi3x":["gpuarch_rdna3"],"navi4x":["gpuarch_rdna4"],"stxh":["apu_stxh"]}
 # A device with no entry is skipped with a warning (the broker could never
 # satisfy a batch tagged with a raw device name — it would queue and time out).
 device_to_tags: {}
@@ -140,28 +140,31 @@ device_to_tags: {}
 # Device -> TheRock AMDGPU family. Selects which per-family artifacts are
 # installed on the machine, and which family_marker above must be present in the
 # source run for this device to be scheduled.
+# Device keys are GPU ARCHITECTURES, not SKUs. The OrchestrAI broker selects by
+# architecture tag (gpuarch_rdna3 matches every RDNA3 board in the fleet), so
+# naming a device "rx7900xt" here would imply a precision the tag does not have.
 device_to_family:
-  rx7900xt: "gfx110X-all" # Navi 3x
-  rx9070xt: "gfx120X-all" # Navi 4x
-  halo: "gfx1151" # Strix Halo APU
+  navi3x: "gfx110X-all"
+  navi4x: "gfx120X-all"
+  stxh: "gfx1151" # Strix Halo APU
 
 # Device family controls Linux kernel-driver policy. Radeon discrete GPUs use
 # AMD's packaged amdgpu/DKMS driver; Ryzen APUs use the Ubuntu inbox amdgpu
 # module. An unclassified Linux device is rejected before hardware is acquired
 # rather than silently getting the wrong driver policy.
 device_families:
-  rx7900xt: "radeon"
-  rx9070xt: "radeon"
-  halo: "ryzen_apu"
+  navi3x: "radeon"
+  navi4x: "radeon"
+  stxh: "ryzen_apu"
 
 # Devices to skip entirely (e.g. temporarily offline hardware).
 #
-# halo is skipped because therock-multi-arch-ci.yml does not build gfx1151
+# stxh is skipped because therock-multi-arch-ci.yml does not build gfx1151
 # today. To light up the APU leg: add gfx1151 to the workflow's
 # linux_amdgpu_families / windows_amdgpu_families, then remove it from this list
 # and add it to the relevant suites' `devices`. Until then the resolver would
 # drop it anyway (no gfx1151 family marker), so skipping keeps the log quiet.
-skip_devices: ["halo"]
+skip_devices: ["stxh"]
 
 # ---------------------------------------------------------------------------
 # Per-run pipeline settings
@@ -194,7 +197,15 @@ run_settings:
 #   git clone --depth 1 https://github.com/ROCm/TheRock
 #   python build_tools/install_rocm_from_artifacts.py \
 #     --run-id "$THEROCK_RUN_ID" --run-github-repo "$THEROCK_RUN_REPO" \
-#     --amdgpu-family "$THEROCK_AMDGPU_FAMILY" --output-dir /opt/rocm
+#     --amdgpu-family "$THEROCK_AMDGPU_FAMILY" \
+#     --output-dir "${DEPS_DIR:-/var/tmp/_testdeps}/therock_sdk"
+#
+# The output dir matters: ucicd-test-library's app.hip.catch2-tests hard-codes
+# SDK_DIR="${DEPS_DIR}/therock_sdk" and only checks that the directory exists.
+# Installing there means the existing HIP Catch2 test needs no change, and its
+# app.therock.sdk-test-collection dependency (which wants a THEROCK_SDK_URL
+# tarball we deliberately do not produce) is skipped by its own
+# only_if_missing guard on "${DEPS_DIR}/therock_sdk/bin".
 provisioning:
   linux_install_scripts:
     - script: "InstallationScripts/gfx/linux-therock-artifacts.sh"

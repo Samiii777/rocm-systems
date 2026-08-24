@@ -23,7 +23,7 @@
 #   ORCHESTRAI_PIPELINE_URL    pipeline host base URL
 #   ORCHESTRAI_PIPELINE_JOB    pipeline job name/path
 #   ORCHESTRAI_DEVICE_TAGS     JSON {device: [maas tags]}, e.g.
-#                              {"rx7900xt":["<tag>"],"rx9070xt":["<tag>"]}
+#                              {"navi3x":["gpuarch_rdna3"],"navi4x":["gpuarch_rdna4"]}
 #   ORCHESTRAI_LINUX_DRIVER_SOURCE (or ..._SOURCES_JSON)  amdgpu-install package
 #     for Radeon Linux hosts
 #
@@ -63,7 +63,7 @@ on:
         required: false
         type: string
       device:
-        description: "Device(s), comma-separated e.g. rx7900xt,rx9070xt (empty = all)"
+        description: "Device(s), comma-separated e.g. navi3x,navi4x (empty = all)"
         required: false
         type: string
       platform:
