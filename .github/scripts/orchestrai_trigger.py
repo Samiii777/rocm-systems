@@ -271,6 +271,19 @@ def make_builds(
         "THEROCK_ARTIFACT_BASE_URL": batch["artifact_base_url"],
     }
 
+    # install_rocm_from_artifacts.py ALWAYS calls the GitHub API to resolve the
+    # artifact bucket, and neither it nor fetch_artifacts.py offers a way to
+    # supply the bucket directly and skip the lookup. Unauthenticated it shares
+    # the fleet's egress IP quota and reliably returns HTTP 429 (build 42018
+    # died there). Treated as required so the run fails here rather than after
+    # acquiring and rebooting a machine. Read-only public-repo scope is enough;
+    # in the workflow this is ${{ github.token }}.
+    github_token = os.environ.get("ORCHESTRAI_GITHUB_TOKEN", "")
+    if github_token:
+        build_vars["GITHUB_TOKEN"] = github_token
+    else:
+        missing.append("ORCHESTRAI_GITHUB_TOKEN")
+
     if platform == "windows":
         # Copy so the config is never mutated across batches.
         scripts = list(prov.get("windows_install_scripts") or [])

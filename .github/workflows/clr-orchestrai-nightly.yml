@@ -193,6 +193,11 @@ jobs:
           ORCHESTRAI_PIPELINE_TOKEN: ${{ secrets.ORCHESTRAI_PIPELINE_TOKEN }}
           ORCHESTRAI_PIPELINE_URL: ${{ vars.ORCHESTRAI_PIPELINE_URL }}
           ORCHESTRAI_PIPELINE_JOB: ${{ vars.ORCHESTRAI_PIPELINE_JOB }}
+          # Handed to the test machine so TheRock's artifact installer can
+          # authenticate its bucket lookup. Unauthenticated it shares the fleet's
+          # egress IP quota and fails with HTTP 429; the lookup cannot be
+          # bypassed. Read-only public-repo scope is all it needs.
+          ORCHESTRAI_GITHUB_TOKEN: ${{ github.token }}
           ORCHESTRAI_LINUX_DRIVER_SOURCE: ${{ vars.ORCHESTRAI_LINUX_DRIVER_SOURCE }}
           # Optional per-release amdgpu map; overrides the single URL above on
           # hosts whose release has an entry.
