@@ -6,12 +6,16 @@
 
 /* Test Case Description:
    Stress test for memory pool allocations. Allocates blocks from 1% to 50%
-   of total device memory in 2% increments, verifies pool attributes
+   of a memory budget in 2% increments, verifies pool attributes
    (UsedMemCurrent, ReservedMemCurrent) after all allocations, then frees
-   all blocks and verifies memory returns to zero.
+   all blocks and verifies memory returns to zero. On integrated devices, where
+   device memory is host RAM, the budget is capped at 1/8 of host memory.
 */
 
 #include <hip_test_common.hh>
+#include <hip_test_helper.hh>
+
+#include <algorithm>
 
 HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) {
   int device = 0;
@@ -20,12 +24,19 @@ HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) {
   hipMemPool_t pool;
   HIP_CHECK(hipDeviceGetDefaultMemPool(&pool, device));
 
-  uint64_t threshold = 0;
-  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
-
   std::size_t free{}, total{};
   HIP_CHECK(hipMemGetInfo(&free, &total));
-  const std::size_t memBudget = total;
+  std::size_t memBudget = std::min(total, free);
+
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  if (prop.integrated) {
+    const std::size_t hostMemMB = HipTest::getTotalSystemMemoryInMB();
+    if (hostMemMB == 0) {
+      HIP_SKIP_TEST("total system memory could not be queried.");
+    }
+    memBudget = std::min(memBudget, hostMemMB / 8 * 1024 * 1024);
+  }
 
   hipStream_t stream = nullptr;
 
@@ -35,21 +46,38 @@ HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) {
   constexpr int kMaxAllocs = (kEndPct - kStartPct) / kStepPct + 1;
   const std::size_t memLimit = (memBudget / 100) * 60;
 
-  void* ptrs[kMaxAllocs] = {};
-  std::size_t sizes[kMaxAllocs] = {};
+  struct PoolState {
+    hipMemPool_t pool;
+    hipStream_t stream;
+    uint64_t origThreshold = 0;
+    void* ptrs[kMaxAllocs] = {};
+    int numAllocs = 0;
+    ~PoolState() {
+      for (int i = 0; i < numAllocs; i++) {
+        static_cast<void>(hipFreeAsync(ptrs[i], stream));
+      }
+      static_cast<void>(hipStreamSynchronize(stream));
+      static_cast<void>(
+          hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &origThreshold));
+    }
+  } state{pool, stream};
+
+  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &state.origThreshold));
+  uint64_t threshold = 0;
+  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
+
   std::size_t expectedTotal = 0;
 
-  // Allocate all blocks, stop when cumulative usage would exceed 60% of device memory
-  int numAllocs = 0;
+  // Allocate all blocks, stop when cumulative usage would exceed 60% of memBudget
   for (int pct = kStartPct; pct <= kEndPct; pct += kStepPct) {
     std::size_t allocSize = (memBudget / 100) * pct;
-    if (expectedTotal + allocSize > memLimit) break;
-    sizes[numAllocs] = allocSize;
-    expectedTotal += allocSize;
-    HIP_CHECK(hipMallocAsync(&ptrs[numAllocs], sizes[numAllocs], stream));
+    if (allocSize == 0 || expectedTotal + allocSize > memLimit) break;
+    HIP_CHECK(hipMallocAsync(&state.ptrs[state.numAllocs], allocSize, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
-    numAllocs++;
+    expectedTotal += allocSize;
+    state.numAllocs++;
   }
+  REQUIRE(state.numAllocs > 0);
 
   // Verify pool reports expected usage after all allocations
   uint64_t usedMem = 0;
@@ -60,8 +88,8 @@ HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) {
   REQUIRE(reservedMem >= expectedTotal);
 
   // Free all blocks
-  for (int i = 0; i < numAllocs; i++) {
-    HIP_CHECK(hipFreeAsync(ptrs[i], stream));
+  for (; state.numAllocs > 0; state.numAllocs--) {
+    HIP_CHECK(hipFreeAsync(state.ptrs[state.numAllocs - 1], stream));
     HIP_CHECK(hipStreamSynchronize(stream));
   }
 
