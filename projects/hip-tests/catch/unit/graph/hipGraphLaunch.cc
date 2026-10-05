@@ -7,6 +7,8 @@
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 
+#include <vector>
+
 /**
  * @addtogroup hipGraphLaunch hipGraphLaunch
  * @{
@@ -129,6 +131,90 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_Negative_Parameters) {
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK_ERROR(hipGraphLaunch(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
   }
+}
+
+static __global__ void IndependentNodeWrite(int* out, int idx, int iters, const int* value) {
+  float v = idx;
+  for (int k = 0; k < iters; ++k) v = v * 1.0001f + 0.5f;
+  if (threadIdx.x == 0) out[idx] = (v != -1.0f) ? *value : -1;
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Launches a graph of edge-free kernel nodes that the runtime collapses onto a single
+ *    stream, so the independent root segments may overlap on one HW queue.
+ *  - Verifies every node observes stream work enqueued before the launch and that work
+ *    enqueued after the launch observes every node, both on the same stream and through an
+ *    event on another stream.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphLaunch.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipGraphLaunch_IndependentNodes_StreamOrdering) {
+  constexpr int kNodes = 20;
+  int* out = nullptr;
+  int* value = nullptr;
+  HIP_CHECK(hipMalloc(&out, kNodes * sizeof(int)));
+  HIP_CHECK(hipMalloc(&value, sizeof(int)));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  std::vector<int> idx(kNodes), iters(kNodes);
+  for (int i = 0; i < kNodes; ++i) {
+    idx[i] = i;
+    // The last node is short so it would finish first if it ignored ordering.
+    iters[i] = (i == kNodes - 1) ? 1 : 200000;
+    void* args[] = {&out, &idx[i], &iters[i], &value};
+    hipKernelNodeParams params{};
+    params.func = reinterpret_cast<void*>(IndependentNodeWrite);
+    params.gridDim = dim3(1);
+    params.blockDim = dim3(64);
+    params.kernelParams = args;
+    hipGraphNode_t node;
+    HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &params));
+  }
+  hipGraphExec_t graph_exec;
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+
+  hipStream_t stream, other;
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&other, hipStreamNonBlocking));
+  hipEvent_t event;
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+
+  std::vector<int> host(kNodes);
+  for (int it = 1; it <= 10; ++it) {
+    HIP_CHECK(hipMemcpyAsync(value, &it, sizeof(int), hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMemsetAsync(out, 0, kNodes * sizeof(int), stream));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    if (it % 2) {
+      HIP_CHECK(
+          hipMemcpyAsync(host.data(), out, kNodes * sizeof(int), hipMemcpyDeviceToHost, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+    } else {
+      HIP_CHECK(hipEventRecord(event, stream));
+      HIP_CHECK(hipStreamWaitEvent(other, event, 0));
+      HIP_CHECK(
+          hipMemcpyAsync(host.data(), out, kNodes * sizeof(int), hipMemcpyDeviceToHost, other));
+      HIP_CHECK(hipStreamSynchronize(other));
+    }
+    for (int i = 0; i < kNodes; ++i) {
+      INFO("iteration " << it << " node " << i);
+      REQUIRE(host[i] == it);
+    }
+  }
+
+  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipStreamDestroy(other));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(value));
+  HIP_CHECK(hipFree(out));
 }
 
 /**

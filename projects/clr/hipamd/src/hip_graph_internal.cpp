@@ -37,6 +37,9 @@ const char* GetGraphNodeTypeString(uint32_t op) {
 
 namespace hip {
 
+// HSA_PACKET_HEADER_BARRIER bit of the AQL packet header.
+constexpr uint32_t kAqlHeaderBarrierBit = 1u << 8;
+
 hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags);
 
 std::atomic<int> GraphNode::nextID{0};
@@ -627,6 +630,31 @@ void GraphExecSegmented::BuildSyncPlan() {
 
     if (segment.segment_ids_edges.empty()) {
       sync_plan_.leaf_segment_ids.push_back(segment.id);
+    }
+  }
+
+  // PASS 4: Every captured kernel packet carries the AQL barrier bit, so a root
+  // segment queued behind another segment on the same stream (always the case
+  // once the graph collapses to one stream) waits for unrelated work. Only the
+  // first segment per stream must keep the barrier to stay ordered after work
+  // queued before the launch; any later barrier packet still waits for all of
+  // them, so dependent segments remain correctly ordered.
+  if (auto level_it = segments_per_level_.find(0); level_it != segments_per_level_.end()) {
+    std::unordered_set<uint64_t> stream_has_segment;
+    for (int seg_id : level_it->second) {
+      const auto& seg = segments_[seg_id];
+      const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(seg.dev_id)) << 32) |
+                           static_cast<uint32_t>(seg.stream_id);
+      if (stream_has_segment.insert(key).second) continue;
+      if (seg.child_graph_ptr != nullptr || !seg.segment_ids_dependencies.empty()) continue;
+      auto segBatchIt = segmentBatches_.find(seg_id);
+      if (segBatchIt == segmentBatches_.end()) continue;
+      auto& segBatch = segBatchIt->second;
+      if (segBatch.packet_batches.empty() || segBatch.node_capture_status.empty() ||
+          !segBatch.node_capture_status.front()) {
+        continue;
+      }
+      segBatch.packet_batches.front().clearFirstBarrier = true;
     }
   }
 
@@ -1959,6 +1987,9 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
       appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, filteredFlatPacketData,
                                filteredValidPacketFullHeaders, filteredFlatMetadataData);
 
+      if (clearFirstBarrier && filteredIdx == 0) {
+        filteredValidPacketFullHeaders[0] &= ~kAqlHeaderBarrierBit;
+      }
       packetToFilteredIndex[dispatchPackets[i]] = filteredIdx;
     } else {
       disabledBatchPackets.insert(dispatchPackets[i]);
@@ -2529,6 +2560,9 @@ void GraphExecSegmented::PacketBatch::rebuildFlatBuffer() {
         (i < dispatchMetadataPackets.size()) ? dispatchMetadataPackets[i] : nullptr;
     appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, flatPacketData,
                              validPacketFullHeaders, flatMetadataData);
+  }
+  if (clearFirstBarrier && !validPacketFullHeaders.empty()) {
+    validPacketFullHeaders[0] &= ~kAqlHeaderBarrierBit;
   }
 }
 
