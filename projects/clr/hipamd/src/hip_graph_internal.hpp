@@ -1352,9 +1352,8 @@ class GraphExecSegmented : public GraphExecBase {
     // when every node packet in this batch is disabled, so the segment can still
     // emit its completion signal instead of losing it. nullptr when unused.
     uint8_t* fallbackBarrier = nullptr;
-    // Set by BuildSyncPlan for a root segment that is not the first segment on
-    // its stream. Its first packet has no ordering requirement against the
-    // independent segments queued before it, so its AQL barrier bit is cleared.
+    // Drop the AQL barrier bit on the first packet so this independent root
+    // segment can overlap earlier roots on the same stream.
     bool clearFirstBarrier = false;
     PacketBatch() {}
     // O(1) enable/disable operations - just update state

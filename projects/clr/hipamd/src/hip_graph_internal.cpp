@@ -633,28 +633,29 @@ void GraphExecSegmented::BuildSyncPlan() {
     }
   }
 
-  // PASS 4: Every captured kernel packet carries the AQL barrier bit, so a root
-  // segment queued behind another segment on the same stream (always the case
-  // once the graph collapses to one stream) waits for unrelated work. Only the
-  // first segment per stream must keep the barrier to stay ordered after work
-  // queued before the launch; any later barrier packet still waits for all of
-  // them, so dependent segments remain correctly ordered.
+  // PASS 4: Clear the AQL barrier bit on root segments queued behind other fully
+  // captured roots on the same stream. In-order launch keeps them after the
+  // stream's first (barrier) packet, and later barrier packets still wait for them.
   if (auto level_it = segments_per_level_.find(0); level_it != segments_per_level_.end()) {
-    std::unordered_set<uint64_t> stream_has_segment;
+    // Per (dev, stream): true while every root dispatched there so far is AQL-only.
+    std::unordered_map<uint64_t, bool> stream_roots_captured;
     for (int seg_id : level_it->second) {
       const auto& seg = segments_[seg_id];
       const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(seg.dev_id)) << 32) |
                            static_cast<uint32_t>(seg.stream_id);
-      if (stream_has_segment.insert(key).second) continue;
-      if (seg.child_graph_ptr != nullptr || !seg.segment_ids_dependencies.empty()) continue;
       auto segBatchIt = segmentBatches_.find(seg_id);
-      if (segBatchIt == segmentBatches_.end()) continue;
-      auto& segBatch = segBatchIt->second;
-      if (segBatch.packet_batches.empty() || segBatch.node_capture_status.empty() ||
-          !segBatch.node_capture_status.front()) {
-        continue;
+      const bool fully_captured =
+          seg.child_graph_ptr == nullptr && seg.segment_ids_dependencies.empty() &&
+          segBatchIt != segmentBatches_.end() && !segBatchIt->second.packet_batches.empty() &&
+          !segBatchIt->second.node_capture_status.empty() &&
+          std::all_of(segBatchIt->second.node_capture_status.begin(),
+                      segBatchIt->second.node_capture_status.end(), [](bool b) { return b; });
+      auto [it, first_on_stream] = stream_roots_captured.emplace(key, fully_captured);
+      if (first_on_stream) continue;
+      if (it->second && fully_captured) {
+        segBatchIt->second.packet_batches.front().clearFirstBarrier = true;
       }
-      segBatch.packet_batches.front().clearFirstBarrier = true;
+      it->second = it->second && fully_captured;
     }
   }
 
