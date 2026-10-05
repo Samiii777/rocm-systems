@@ -633,29 +633,31 @@ void GraphExecSegmented::BuildSyncPlan() {
     }
   }
 
-  // PASS 4: Clear the AQL barrier bit on root segments queued behind other fully
-  // captured roots on the same stream. In-order launch keeps them after the
-  // stream's first (barrier) packet, and later barrier packets still wait for them.
+  // PASS 4: Captured kernel packets carry the AQL barrier bit, so independent root
+  // segments sharing a stream would serialize. Clear it on all but the first root
+  // per stream. That first root must start with a captured (barrier) packet: AQL
+  // launches in order, so the later roots still start only after work queued
+  // before the graph launch has completed.
   if (auto level_it = segments_per_level_.find(0); level_it != segments_per_level_.end()) {
-    // Per (dev, stream): true while every root dispatched there so far is AQL-only.
-    std::unordered_map<uint64_t, bool> stream_roots_captured;
+    std::unordered_map<uint64_t, bool> stream_starts_with_barrier;
     for (int seg_id : level_it->second) {
       const auto& seg = segments_[seg_id];
       const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(seg.dev_id)) << 32) |
                            static_cast<uint32_t>(seg.stream_id);
       auto segBatchIt = segmentBatches_.find(seg_id);
-      const bool fully_captured =
-          seg.child_graph_ptr == nullptr && seg.segment_ids_dependencies.empty() &&
-          segBatchIt != segmentBatches_.end() && !segBatchIt->second.packet_batches.empty() &&
-          !segBatchIt->second.node_capture_status.empty() &&
-          std::all_of(segBatchIt->second.node_capture_status.begin(),
-                      segBatchIt->second.node_capture_status.end(), [](bool b) { return b; });
-      auto [it, first_on_stream] = stream_roots_captured.emplace(key, fully_captured);
-      if (first_on_stream) continue;
-      if (it->second && fully_captured) {
-        segBatchIt->second.packet_batches.front().clearFirstBarrier = true;
+      bool first_captured = false;
+      if (seg.child_graph_ptr == nullptr && segBatchIt != segmentBatches_.end()) {
+        const auto& segBatch = segBatchIt->second;
+        first_captured = !segBatch.packet_batches.empty() &&
+                         !segBatch.node_capture_status.empty() &&
+                         segBatch.node_capture_status.front();
       }
-      it->second = it->second && fully_captured;
+      auto [it, first_on_stream] = stream_starts_with_barrier.emplace(key, first_captured);
+      if (first_on_stream || !it->second || !first_captured ||
+          !seg.segment_ids_dependencies.empty()) {
+        continue;
+      }
+      segBatchIt->second.packet_batches.front().clearFirstBarrier = true;
     }
   }
 
